@@ -220,7 +220,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
                     plotBlueprint: newBlueprint.length > 0 ? newBlueprint : prev.plotBlueprint
                 };
             });
-            setActivePanel(4); // Switch to plot panel to show result
+            setActivePanel(0); // Switch to protagonist panel to show result
         } catch (e) { console.error(e); alert("解析失败，请稍后重试"); } finally { setIsParsing(false); }
     };
 

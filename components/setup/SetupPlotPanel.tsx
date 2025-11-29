@@ -197,7 +197,7 @@ export const PlotBlueprintModal: React.FC<PlotBlueprintModalProps> = ({
                                         {isCompleted && <span className="text-[8px] text-white font-bold">✓</span>}
                                     </div>
                                     
-                                    <div className={`p-2.5 rounded-lg border transition-all duration-300 ${borderClass}`}>
+                                    <div className={`p-2.5 rounded-lg border transition-all duration-300 hover:shadow-md hover:-translate-y-0.5 ${borderClass}`}>
                                         <div className="flex justify-between items-center mb-1">
                                             <span className="text-[10px] font-bold text-gray-400">
                                                 #{chapters.findIndex(c => c.id === chapter.id) + 1}
