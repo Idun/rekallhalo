@@ -697,20 +697,20 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
                                         <div 
                                             key={skill.id} 
                                             onClick={() => openEditSkillModal(skill)}
-                                            className={`bg-white p-2 rounded border shadow-sm flex justify-between items-center text-xs transition-colors cursor-pointer border-stone-200 hover:border-yellow-300 hover:bg-stone-50`}
+                                            className={`bg-white p-2 rounded border shadow-sm flex justify-between items-start text-xs transition-colors cursor-pointer border-stone-200 hover:border-yellow-300 hover:bg-stone-50`}
                                             title="点击编辑"
                                         >
-                                            <div className="flex-1">
-                                                <div className="font-medium text-gray-800 flex items-center gap-1">
-                                                    <span className={`text-[9px] px-1 rounded font-bold ${skill.type === 'passive' ? 'bg-blue-100 text-blue-600' : 'bg-yellow-100 text-yellow-700'}`}>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="font-medium text-gray-800 flex items-center gap-1 mb-0.5">
+                                                    <span className={`text-[9px] px-1 rounded font-bold shrink-0 ${skill.type === 'passive' ? 'bg-blue-100 text-blue-600' : 'bg-yellow-100 text-yellow-700'}`}>
                                                         {skill.type === 'passive' ? '被' : '主'}
                                                     </span>
-                                                    {skill.name}
-                                                    <span className="text-[9px] text-yellow-700 bg-yellow-200 px-1 rounded ml-1 font-bold">Lv.{skill.level || 1}</span>
+                                                    <span className="truncate">{skill.name}</span>
+                                                    <span className="text-[9px] text-yellow-700 bg-yellow-200 px-1 rounded ml-1 font-bold shrink-0">Lv.{skill.level || 1}</span>
                                                 </div>
-                                                <div className="text-[10px] text-gray-500 truncate mt-0.5">{skill.description}</div>
+                                                <div className="text-[10px] text-gray-500 break-words whitespace-pre-wrap leading-tight">{skill.description}</div>
                                             </div>
-                                            <button onClick={(e) => handleRemoveSkill(skill.id, e)} className="text-gray-400 hover:text-red-500 ml-2 p-1 font-bold">✕</button>
+                                            <button onClick={(e) => handleRemoveSkill(skill.id, e)} className="text-gray-400 hover:text-red-500 ml-2 p-1 font-bold shrink-0">✕</button>
                                         </div>
                                     ))
                                 )}
