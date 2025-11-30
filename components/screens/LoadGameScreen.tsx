@@ -36,6 +36,9 @@ interface TreeNode {
 
 type ViewMode = 'list' | 'canvas';
 
+const GRID_SIZE = 25; // Grid size for snapping
+const NODE_POSITIONS_KEY = 'protagonist_node_positions'; // localStorage key
+
 // Default Memory structure for imports
 const DEFAULT_MEMORY = {
     memoryZone: "",
@@ -231,6 +234,30 @@ export const LoadGameScreen: React.FC<LoadGameScreenProps> = ({ savedGames, onLo
     const containerRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [selectedSave, setSelectedSave] = useState<SavedGame | null>(null);
+
+    // Load node positions from localStorage on component mount
+    useEffect(() => {
+        try {
+            const savedPositions = localStorage.getItem(NODE_POSITIONS_KEY);
+            if (savedPositions) {
+                setNodePositions(JSON.parse(savedPositions));
+            }
+        } catch (e) {
+            console.error("Failed to load node positions from localStorage", e);
+        }
+    }, []);
+
+    // Save node positions to localStorage whenever they change
+    useEffect(() => {
+        try {
+            if (Object.keys(nodePositions).length > 0) {
+                 localStorage.setItem(NODE_POSITIONS_KEY, JSON.stringify(nodePositions));
+            }
+        } catch (e) {
+            console.error("Failed to save node positions to localStorage", e);
+        }
+    }, [nodePositions]);
+
 
     // Track Ctrl Key
     useEffect(() => {
@@ -443,6 +470,12 @@ export const LoadGameScreen: React.FC<LoadGameScreenProps> = ({ savedGames, onLo
                  children?.forEach(childSave => {
                      const childNode = nodesMap[childSave.id];
                      if (childNode) {
+                         // If the child node is the start of a new chapter, do not draw a connecting line from the parent.
+                         // This makes it a new visual root for that chapter.
+                         if (childNode.chapterInfo?.isStart) {
+                            return; // Skips creating an edge for this child
+                         }
+
                          const isTextNode = !childSave.choiceLabel && !!childSave.parentId;
                          edges.push({
                              x1: node.x + 50,
@@ -463,7 +496,7 @@ export const LoadGameScreen: React.FC<LoadGameScreenProps> = ({ savedGames, onLo
         return trees;
     }, [savedGames, nodePositions, focusedSessionId]);
 
-    // Canvas Events (Unchanged)
+    // Canvas Events
     const handleWheel = (e: React.WheelEvent) => {
         if (viewMode !== 'canvas' || !containerRef.current) return;
         e.stopPropagation();
@@ -483,6 +516,12 @@ export const LoadGameScreen: React.FC<LoadGameScreenProps> = ({ savedGames, onLo
 
     const handleMouseDown = (e: React.MouseEvent) => {
         if (viewMode !== 'canvas') return;
+        
+        // If the click is on a node or its child, don't start panning.
+        if ((e.target as HTMLElement).closest('.story-node-draggable')) {
+            return;
+        }
+
         isBackgroundInteractionRef.current = true;
         setIsPanning(true);
         setLastMousePos({ x: e.clientX, y: e.clientY });
@@ -497,7 +536,14 @@ export const LoadGameScreen: React.FC<LoadGameScreenProps> = ({ savedGames, onLo
             hasMovedRef.current = true;
             const dx = (e.clientX - dragNodeState.startX) / scale;
             const dy = (e.clientY - dragNodeState.startY) / scale;
-            setNodePositions(prev => ({ ...prev, [dragNodeState.id]: { x: dragNodeState.originX + dx, y: dragNodeState.originY + dy } }));
+            
+            const newX = dragNodeState.originX + dx;
+            const newY = dragNodeState.originY + dy;
+            
+            const snappedX = Math.round(newX / GRID_SIZE) * GRID_SIZE;
+            const snappedY = Math.round(newY / GRID_SIZE) * GRID_SIZE;
+
+            setNodePositions(prev => ({ ...prev, [dragNodeState.id]: { x: snappedX, y: snappedY } }));
         } else if (isPanning) {
             hasMovedRef.current = true;
             const dx = e.clientX - lastMousePos.x;
@@ -743,8 +789,8 @@ export const LoadGameScreen: React.FC<LoadGameScreenProps> = ({ savedGames, onLo
                         className="absolute inset-0 opacity-10 pointer-events-none transition-opacity duration-500"
                         style={{
                             backgroundImage: 'radial-gradient(circle, #000 1.5px, transparent 1.5px)',
-                            backgroundSize: `${30 * scale}px ${30 * scale}px`,
-                            transform: `translate(${pan.x % (30 * scale)}px, ${pan.y % (30 * scale)}px)`
+                            backgroundSize: `${GRID_SIZE * scale}px ${GRID_SIZE * scale}px`,
+                            transform: `translate(${pan.x % (GRID_SIZE * scale)}px, ${pan.y % (GRID_SIZE * scale)}px)`
                         }}
                     />
 
@@ -811,7 +857,7 @@ export const LoadGameScreen: React.FC<LoadGameScreenProps> = ({ savedGames, onLo
                                     return (
                                         <div
                                             key={node.save.id}
-                                            className={`absolute flex justify-center items-center group z-10 hover:z-50`}
+                                            className={`absolute flex justify-center items-center group z-10 hover:z-50 story-node-draggable`}
                                             style={{
                                                 left: node.x,
                                                 top: node.y,
@@ -821,6 +867,7 @@ export const LoadGameScreen: React.FC<LoadGameScreenProps> = ({ savedGames, onLo
                                             onMouseDown={(e) => {
                                                 if (isCtrlDown) {
                                                     e.stopPropagation();
+                                                    setIsPanning(false);
                                                     setDragNodeState({
                                                         id: node.save.id,
                                                         startX: e.clientX,
@@ -830,7 +877,12 @@ export const LoadGameScreen: React.FC<LoadGameScreenProps> = ({ savedGames, onLo
                                                     });
                                                 } else {
                                                     e.stopPropagation();
-                                                    setSelectedSave(node.save);
+                                                    setSelectedSave(prev => {
+                                                        if (prev && prev.id === node.save.id) {
+                                                            return null;
+                                                        }
+                                                        return node.save;
+                                                    });
                                                 }
                                             }}
                                         >

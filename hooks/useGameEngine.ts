@@ -84,14 +84,15 @@ export const useGameEngine = () => {
   const [modals, setModals] = useState({
       image: false,
       load: false,
+      gallery: false,
       history: false,
       exitConfirm: false,
       skill: false,
       character: false,
       regenConfirm: false,
       settings: false,
-      gallery: false,
-      saveNotification: false
+      saveNotification: false,
+      avatarGen: false // New modal state
   });
   
   // Settings State
@@ -186,20 +187,11 @@ export const useGameEngine = () => {
 
   // ... (Effects: Load Logic, BGM, Auto Save - unchanged) ...
   useEffect(() => {
-    let avatarDict: Record<string, string> = {};
-    try {
-        const storedAvatars = localStorage.getItem('protagonist_avatars');
-        if (storedAvatars) avatarDict = JSON.parse(storedAvatars);
-    } catch (e) { console.error(e); }
-
     const saves = localStorage.getItem('protagonist_saves');
     if (saves) {
         try { 
             const parsedSaves: SavedGame[] = JSON.parse(saves);
             const hydratedSaves = parsedSaves.map(s => {
-                if (!s.context.character.avatar && avatarDict[s.sessionId]) {
-                    s.context.character.avatar = avatarDict[s.sessionId];
-                }
                 if (!s.context.scheduledEvents) s.context.scheduledEvents = [];
                 if (!s.context.plotBlueprint) s.context.plotBlueprint = [];
                 if (!s.context.character.perspective) s.context.character.perspective = 'third';
@@ -253,6 +245,17 @@ export const useGameEngine = () => {
 
   useEffect(() => { latestContextRef.current = context; }, [context]);
 
+  // This useEffect will sync the main background image state with the current story segment's background.
+  // This prevents desynchronization when the context is updated by functions that don't explicitly set the bgImage state (like avatar regeneration).
+  useEffect(() => {
+    if (gameState === GameState.PLAYING && context.currentSegment?.backgroundImage) {
+      if (bgImage !== context.currentSegment.backgroundImage) {
+        setBgImage(context.currentSegment.backgroundImage);
+      }
+    }
+  }, [context, gameState]);
+
+
   // ... (saveGameToStorage, Auto Save Effects, BGM Effects - unchanged) ...
   const saveGameToStorage = useCallback((currentContext: GameContext, type: SaveType) => {
     const now = Date.now();
@@ -269,20 +272,10 @@ export const useGameEngine = () => {
     }
 
     setTimeout(() => {
-        const avatarToKeep = currentContext.character.avatar;
-        if (avatarToKeep) {
-            try {
-                let avatars = {};
-                const storedAvatars = localStorage.getItem('protagonist_avatars');
-                if (storedAvatars) avatars = JSON.parse(storedAvatars);
-                // @ts-ignore
-                avatars[currentContext.sessionId] = avatarToKeep;
-                localStorage.setItem('protagonist_avatars', JSON.stringify(avatars));
-            } catch (e) { console.warn("Avatar storage failed", e); }
-        }
-
         const contextToSave: GameContext = JSON.parse(JSON.stringify(currentContext));
-        contextToSave.character.avatar = undefined;
+
+        // Strip excessively large background images before saving to avoid bloating storage.
+        // Keep URLs.
         if (contextToSave.history) {
             contextToSave.history = contextToSave.history.map(h => ({
                 ...h,
@@ -317,8 +310,6 @@ export const useGameEngine = () => {
             metaData: { highestAffinityNPC, totalSkillLevel, turnCount: currentContext.history.length }
         };
 
-        if (avatarToKeep) newSave.context.character.avatar = avatarToKeep;
-
         setSavedGames(prev => {
             let newSaves = [...prev];
             let existingIndex = -1;
@@ -336,8 +327,15 @@ export const useGameEngine = () => {
                      newSaves[existingIndex] = newSave;
                      if (currentLoadedSaveId !== newSave.id) setCurrentLoadedSaveId(newSave.id);
                 } else if (type === SaveType.AUTO) {
-                     if (existingSave.type === SaveType.MANUAL) return prev;
-                     else newSaves[existingIndex] = newSave;
+                    if (existingSave.type === SaveType.MANUAL) {
+                        // FIX: Update the manual save's data, but preserve its type.
+                        newSaves[existingIndex] = {
+                            ...newSave, // has new context and new timestamp
+                            type: SaveType.MANUAL, // keep it manual
+                        };
+                    } else {
+                        newSaves[existingIndex] = newSave;
+                    }
                 }
             } else {
                 newSaves.unshift(newSave);
@@ -345,11 +343,7 @@ export const useGameEngine = () => {
             }
 
             let limitedSaves = newSaves.slice(0, 20); 
-            const savesForStorage = limitedSaves.map(s => {
-                if (s.context.character.avatar) return { ...s, context: { ...s.context, character: { ...s.context.character, avatar: undefined } } };
-                return s;
-            });
-            try { localStorage.setItem('protagonist_saves', JSON.stringify(savesForStorage)); } catch (e) {}
+            try { localStorage.setItem('protagonist_saves', JSON.stringify(limitedSaves)); } catch (e) {}
             return limitedSaves;
         });
 
@@ -358,7 +352,7 @@ export const useGameEngine = () => {
             setTimeout(() => setAutoSaveState(null), 2000);
         }
     }, 0);
-  }, [currentLoadedSaveId, bgImage, backgroundStyle]);
+  }, [currentLoadedSaveId, backgroundStyle]);
 
   useEffect(() => {
     if (gameState === GameState.PLAYING && textTypingComplete && !isLoading) {
@@ -477,15 +471,6 @@ export const useGameEngine = () => {
           if (!isDuplicate) {
               updates.push(s);
               successCount++;
-              if (s.context.character.avatar) {
-                  try {
-                      let avatars: Record<string, string> = {};
-                      const storedAvatars = localStorage.getItem('protagonist_avatars');
-                      if (storedAvatars) avatars = JSON.parse(storedAvatars);
-                      avatars[s.sessionId] = s.context.character.avatar;
-                      localStorage.setItem('protagonist_avatars', JSON.stringify(avatars));
-                  } catch (e) {}
-              }
               const allSegments = [...(s.context.history || [])];
               if (s.context.currentSegment && !allSegments.find(seg => seg.id === s.context.currentSegment!.id)) {
                   allSegments.push(s.context.currentSegment);
@@ -499,9 +484,8 @@ export const useGameEngine = () => {
       });
       if (successCount > 0) {
           updates.sort((a, b) => b.timestamp - a.timestamp);
-          const savesForStorage = updates.map(s => { if (s.context.character.avatar) return { ...s, context: { ...s.context, character: { ...s.context.character, avatar: undefined } } }; return s; });
           setSavedGames(updates);
-          try { localStorage.setItem('protagonist_saves', JSON.stringify(savesForStorage)); } catch (e) {}
+          try { localStorage.setItem('protagonist_saves', JSON.stringify(updates)); } catch (e) {}
       }
       return successCount;
   };
@@ -526,13 +510,7 @@ export const useGameEngine = () => {
   const deleteSession = (sessionId: string) => {
     setSavedGames(prev => {
         const updatedSaves = prev.filter(s => s.sessionId !== sessionId);
-        const savesForStorage = updatedSaves.map(s => {
-            if (s.context.character.avatar) {
-                return { ...s, context: { ...s.context, character: { ...s.context.character, avatar: undefined } } };
-            }
-            return s;
-        });
-        try { localStorage.setItem('protagonist_saves', JSON.stringify(savesForStorage)); } catch (e) { }
+        try { localStorage.setItem('protagonist_saves', JSON.stringify(updatedSaves)); } catch (e) { }
         return updatedSaves;
     });
     if (previewSaveId && savedGames.find(s => s.id === previewSaveId)?.sessionId === sessionId) { setPreviewSaveId(null); }
@@ -542,13 +520,7 @@ export const useGameEngine = () => {
       if(e) e.stopPropagation();
       setSavedGames(prev => {
           const updatedSaves = prev.filter(s => s.id !== saveId);
-          const savesForStorage = updatedSaves.map(s => {
-              if (s.context.character.avatar) {
-                  return { ...s, context: { ...s.context, character: { ...s.context.character, avatar: undefined } } };
-              }
-              return s;
-          });
-          try { localStorage.setItem('protagonist_saves', JSON.stringify(savesForStorage)); } catch (e) {}
+          try { localStorage.setItem('protagonist_saves', JSON.stringify(updatedSaves)); } catch (e) {}
           return updatedSaves;
       });
       if (previewSaveId === saveId) setPreviewSaveId(null);
@@ -556,17 +528,23 @@ export const useGameEngine = () => {
   
   const handleAddScheduledEvent = (event: Omit<ScheduledEvent, 'id' | 'createdTurn' | 'status'>) => {
       const newEvent: ScheduledEvent = { ...event, id: generateUUID(), createdTurn: context.history.length, status: 'pending' };
-      setContext(prev => ({ ...prev, scheduledEvents: [...(prev.scheduledEvents || []), newEvent] }));
+      const nextContext = { ...context, scheduledEvents: [...(context.scheduledEvents || []), newEvent] };
+      setContext(nextContext);
+      saveGameToStorage(nextContext, SaveType.AUTO);
       playConfirmSound();
   };
 
   const handleUpdateScheduledEvent = (updatedEvent: ScheduledEvent) => {
-      setContext(prev => ({ ...prev, scheduledEvents: (prev.scheduledEvents || []).map(e => e.id === updatedEvent.id ? updatedEvent : e) }));
+      const nextContext = { ...context, scheduledEvents: (context.scheduledEvents || []).map(e => e.id === updatedEvent.id ? updatedEvent : e) };
+      setContext(nextContext);
+      saveGameToStorage(nextContext, SaveType.AUTO);
       playConfirmSound();
   };
 
   const handleDeleteScheduledEvent = (id: string) => {
-      setContext(prev => ({ ...prev, scheduledEvents: (prev.scheduledEvents || []).filter(e => e.id !== id) }));
+      const nextContext = { ...context, scheduledEvents: (context.scheduledEvents || []).filter(e => e.id !== id) };
+      setContext(nextContext);
+      saveGameToStorage(nextContext, SaveType.AUTO);
       playClickSound();
   };
 
@@ -613,7 +591,6 @@ export const useGameEngine = () => {
     if (!ctx.plotBlueprint) ctx.plotBlueprint = []; 
     if (!ctx.character.perspective) ctx.character.perspective = 'third';
     if (!ctx.storyName && save.storyName) ctx.storyName = save.storyName; else if (save.storyName) ctx.storyName = save.storyName;
-    if (!ctx.character.avatar) { try { const storedAvatars = localStorage.getItem('protagonist_avatars'); if (storedAvatars) { const dict = JSON.parse(storedAvatars); if (dict[save.sessionId]) ctx.character.avatar = dict[save.sessionId]; } } catch (e) {} }
     if (ctx.currentSegment && !ctx.currentSegment.backgroundImage) { let curr: SavedGame | undefined = save; let resolvedBg: string | undefined = undefined; while (curr && !resolvedBg) { if (curr.context.currentSegment?.backgroundImage) { resolvedBg = curr.context.currentSegment.backgroundImage; } else if (curr.parentId) { const pid = curr.parentId; curr = savedGames.find(s => s.storyId === pid); } else { break; } } if (resolvedBg) ctx.currentSegment.backgroundImage = resolvedBg; }
     if (!ctx.memories) ctx.memories = DEFAULT_MEMORY; if (ctx.memories && !ctx.memories.inventory) ctx.memories.inventory = "暂无物品";
     setContext(ctx); setLastSavedTime(save.timestamp || Date.now());
@@ -688,142 +665,209 @@ export const useGameEngine = () => {
   const triggerManualImageGeneration = async (visualPrompt: string, targetSegmentId: string, style: string = 'anime', characterInfo: string = '', customStyle: string = '', referenceImage?: string) => { if (!visualPrompt) return; setGeneratingImage(true); try { const randomShot = [ShotSize.MEDIUM_SHOT, ShotSize.CLOSE_UP, ShotSize.LONG_SHOT, ShotSize.EXTREME_CLOSE_UP, ShotSize.DYNAMIC_PERSPECTIVE][Math.floor(Math.random() * 5)]; const imageBase64 = await GeminiService.generateSceneImage(visualPrompt, ImageSize.SIZE_1K, style, characterInfo, customStyle, imageModel, modelScopeApiKey, randomShot, referenceImage); if (!imageBase64 || !imageBase64.startsWith('data:image')) throw new Error("Invalid image"); if (autoSaveGallery) { addToGallery(imageBase64, visualPrompt, style); } setContext(prev => { const segmentIndex = prev.history.findIndex(h => h.id === targetSegmentId); if (segmentIndex === -1) return prev; const updatedHistory = [...prev.history]; updatedHistory[segmentIndex] = { ...updatedHistory[segmentIndex], backgroundImage: imageBase64 }; const updatedCurrent = prev.currentSegment?.id === targetSegmentId ? updatedHistory[segmentIndex] : prev.currentSegment; return { ...prev, history: updatedHistory, currentSegment: updatedCurrent, lastUpdated: Date.now() }; }); setBgImage(imageBase64); } catch (e: any) { console.warn("Image generation failed", e); } finally { setGeneratingImage(false); } };
   
   const handleSummarizeMemory = async () => { playClickSound(); if (context.history.length < 2) return; setIsSummarizing(true); try { const summary = await GeminiService.summarizeHistory(context.history, aiModel); setContext(prev => ({ ...prev, memories: { ...prev.memories, storyMemory: summary } })); playProgressSound(); } catch(e) { console.error("Summarize failed", e); } finally { setIsSummarizing(false); } };
-  const handleGlobalReplace = (findText: string, replaceText: string): number => { if (!findText || !replaceText) return 0; const escapeRegExp = (string: string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); const regex = new RegExp(escapeRegExp(findText), 'g'); let count = 0; const countIn = (s: string | undefined) => s ? (s.match(regex) || []).length : 0; Object.values(context.memories).forEach(val => { if (typeof val === 'string') count += countIn(val); }); const limit = 5; const startIndex = Math.max(0, context.history.length - limit); for (let i = startIndex; i < context.history.length; i++) { const seg = context.history[i]; count += countIn(seg.text); seg.choices.forEach(c => count += countIn(c)); } if (context.currentSegment && !context.history.find(h => h.id === context.currentSegment?.id)) { count += countIn(context.currentSegment.text); } if (count === 0) return 0; setContext(prev => { const newMemories = { ...prev.memories }; (Object.keys(newMemories) as (keyof MemoryState)[]).forEach(k => { if (typeof newMemories[k] === 'string') newMemories[k] = newMemories[k].replace(regex, replaceText); }); const newHistory = [...prev.history]; const start = Math.max(0, newHistory.length - limit); for (let i = start; i < newHistory.length; i++) { let updatedText = newHistory[i].text.replace(regex, replaceText); let updatedChoices = newHistory[i].choices.map(c => c.replace(regex, replaceText)); newHistory[i] = { ...newHistory[i], text: updatedText, choices: updatedChoices }; } let newCurrent = prev.currentSegment ? { ...prev.currentSegment } : null; if (newCurrent) { newCurrent.text = newCurrent.text.replace(regex, replaceText); newCurrent.choices = newCurrent.choices.map(c => c.replace(regex, replaceText)); } return { ...prev, memories: newMemories, history: newHistory, currentSegment: newCurrent, lastUpdated: Date.now() }; }); return count; };
-  const handleUpgradeSkill = (skillId: string) => { setContext(prev => ({ ...prev, character: { ...prev.character, skills: prev.character.skills.map(s => s.id === skillId ? { ...s, level: (s.level || 1) + 1 } : s ) } })); playProgressSound(); };
+  const handleGlobalReplace = (findText: string, replaceText: string): number => {
+      if (!findText || !replaceText) return 0;
+      const escapeRegExp = (string: string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(escapeRegExp(findText), 'g');
+      let count = 0;
+      const countIn = (s: string | undefined) => s ? (s.match(regex) || []).length : 0;
+      Object.values(context.memories).forEach(val => { if (typeof val === 'string') count += countIn(val); });
+      const limit = 5;
+      const startIndex = Math.max(0, context.history.length - limit);
+      for (let i = startIndex; i < context.history.length; i++) {
+          const seg = context.history[i];
+          count += countIn(seg.text);
+          seg.choices.forEach(c => count += countIn(c));
+      }
+      if (context.currentSegment && !context.history.find(h => h.id === context.currentSegment?.id)) {
+          count += countIn(context.currentSegment.text);
+      }
+      if (count === 0) return 0;
+      
+      const nextContext = ((prev: GameContext): GameContext => {
+          const newMemories = { ...prev.memories };
+          (Object.keys(newMemories) as (keyof MemoryState)[]).forEach(k => {
+              if (typeof newMemories[k] === 'string') newMemories[k] = (newMemories[k] as string).replace(regex, replaceText);
+          });
+          const newHistory = [...prev.history];
+          const start = Math.max(0, newHistory.length - limit);
+          for (let i = start; i < newHistory.length; i++) {
+              let updatedText = newHistory[i].text.replace(regex, replaceText);
+              let updatedChoices = newHistory[i].choices.map(c => c.replace(regex, replaceText));
+              newHistory[i] = { ...newHistory[i], text: updatedText, choices: updatedChoices };
+          }
+          let newCurrent = prev.currentSegment ? { ...prev.currentSegment } : null;
+          if (newCurrent) {
+              newCurrent.text = newCurrent.text.replace(regex, replaceText);
+              newCurrent.choices = newCurrent.choices.map(c => c.replace(regex, replaceText));
+          }
+          return { ...prev, memories: newMemories, history: newHistory, currentSegment: newCurrent, lastUpdated: Date.now() };
+      })(context);
+
+      setContext(nextContext);
+      saveGameToStorage(nextContext, SaveType.AUTO);
+      return count;
+  };
+  const handleUpgradeSkill = (skillId: string) => {
+      const nextContext = {
+          ...context,
+          character: {
+              ...context.character,
+              skills: context.character.skills.map(s => s.id === skillId ? { ...s, level: (s.level || 1) + 1 } : s)
+          }
+      };
+      setContext(nextContext);
+      saveGameToStorage(nextContext, SaveType.AUTO);
+      playProgressSound();
+  };
   const handleAbortGame = () => { if (abortControllerRef.current) abortControllerRef.current.abort(); if (progressTimerRef.current) clearInterval(progressTimerRef.current); setGameState(GameState.SETUP); setError("已终止世界生成。"); playClickSound(); };
   
-  // Refactored Regenerate with Modes
-  const handleRegenerate = async (mode: 'full' | 'text' | 'choices' = 'full') => { 
-      playClickSound(); 
-      const lastIdx = context.history.length - 1; 
-      if (lastIdx < 0) return; 
-      const lastSegment = context.history[lastIdx]; 
-      
-      // For full/text regen, we need a parent choice. For choices regen, we just need current context.
-      if (mode !== 'choices' && lastIdx > 0 && !lastSegment.causedBy) { 
-          setError("无法重新生成此节点"); 
-          return; 
-      } 
-      
-      setIsLoading(true); 
-      setError(null); 
-      
-      try { 
-          let newSegment: StorySegment; 
-          
+  const handleRegenerate = async (mode: 'full' | 'text' | 'choices' = 'full') => {
+      playClickSound();
+      const lastIdx = context.history.length - 1;
+      if (lastIdx < 0) return;
+      const lastSegment = context.history[lastIdx];
+
+      if (mode !== 'choices' && lastIdx > 0 && !lastSegment.causedBy) {
+          setError("无法重新生成此节点");
+          return;
+      }
+      setIsLoading(true);
+      setError(null);
+      try {
+          let newSegment: StorySegment;
           if (mode === 'choices') {
-              // Only regenerating choices based on current text
-              // We pass the full history including current segment to give context
-              // But we trick advanceStory to think we are just continuing, effectively using the current text as "recent history"
-              const historyContext = context.history; 
-              // We pass an empty string as "userChoice" because we aren't advancing, just asking for options
-              // The backend needs to handle 'choices' mode specifically to output new choices for the *existing* context
-              newSegment = await GeminiService.advanceStory(
-                  historyContext, 
-                  "", // No user input for re-rolling choices of current state
-                  context.genre, 
-                  context.character, 
-                  context.supportingCharacters, 
-                  context.worldSettings, 
-                  context.memories, 
-                  aiModel, 
-                  context.customGenre, 
-                  customPrompt, 
-                  context.scheduledEvents || [], 
-                  context.narrativeMode, 
-                  context.narrativeTechnique, 
-                  context.plotBlueprint,
-                  'choices' // NEW PARAM
-              );
-              
-              // Only update choices
-              setContext(prev => {
+              newSegment = await GeminiService.advanceStory(context.history, "", context.genre, context.character, context.supportingCharacters, context.worldSettings, context.memories, aiModel, context.customGenre, customPrompt, context.scheduledEvents || [], context.narrativeMode, context.narrativeTechnique, context.plotBlueprint, 'choices');
+              const nextContext = ((prev: GameContext): GameContext => {
                   const history = [...prev.history];
                   const currentSeg = { ...history[lastIdx] };
-                  currentSeg.choices = newSegment.choices; // Update choices
+                  currentSeg.choices = newSegment.choices;
                   history[lastIdx] = currentSeg;
                   return { ...prev, history, currentSegment: currentSeg, lastUpdated: Date.now() };
-              });
-
+              })(context);
+              setContext(nextContext);
+              saveGameToStorage(nextContext, SaveType.AUTO);
           } else {
-              // Full or Text regeneration (Requires stepping back)
-              const historyContext = context.history.slice(0, lastIdx); 
-              
-              if (lastIdx === 0) { 
-                  newSegment = await GeminiService.generateOpening(context.genre, context.character, context.supportingCharacters, context.worldSettings, aiModel, context.customGenre, context.storyName, customPrompt, context.narrativeMode, context.narrativeTechnique, context.plotBlueprint); 
-              } else { 
-                  const causedBy = lastSegment.causedBy || ""; 
-                  newSegment = await GeminiService.advanceStory(
-                      historyContext, 
-                      causedBy, 
-                      context.genre, 
-                      context.character, 
-                      context.supportingCharacters, 
-                      context.worldSettings, 
-                      context.memories, 
-                      aiModel, 
-                      context.customGenre, 
-                      customPrompt, 
-                      context.scheduledEvents || [], 
-                      context.narrativeMode, 
-                      context.narrativeTechnique, 
-                      context.plotBlueprint,
-                      mode // 'full' or 'text'
-                  ); 
-                  newSegment.causedBy = causedBy; 
-              } 
-              
-              setContext(prev => { 
-                  const history = [...prev.history]; 
-                  const currentSeg = { ...history[lastIdx] }; 
-                  if (!currentSeg.versions) { 
-                      currentSeg.versions = [{ text: currentSeg.text, choices: currentSeg.choices, visualPrompt: currentSeg.visualPrompt, mood: currentSeg.mood }]; 
-                      currentSeg.currentVersionIndex = 0; 
-                  } 
-                  
-                  const newVersion = { 
-                      text: newSegment.text, 
-                      choices: newSegment.choices, 
-                      visualPrompt: newSegment.visualPrompt, 
-                      mood: newSegment.mood, 
-                      location: newSegment.location 
-                  }; 
-                  
-                  currentSeg.versions.push(newVersion); 
-                  const newIdx = currentSeg.versions.length - 1; 
-                  currentSeg.currentVersionIndex = newIdx; 
-                  
-                  // Update fields
-                  currentSeg.text = newVersion.text; 
-                  currentSeg.choices = newVersion.choices; 
-                  currentSeg.visualPrompt = newVersion.visualPrompt; 
-                  currentSeg.mood = newVersion.mood; 
-                  currentSeg.location = newVersion.location; 
-                  
-                  history[lastIdx] = currentSeg; 
-                  
-                  // Only update memories if it's a full/text regen (as the story changed)
-                  return { 
-                      ...prev, 
-                      history, 
-                      currentSegment: currentSeg, 
-                      memories: newSegment.newMemories || prev.memories, 
-                      lastUpdated: Date.now() 
-                  }; 
-              }); 
+              const historyContext = context.history.slice(0, lastIdx);
+              if (lastIdx === 0) {
+                  newSegment = await GeminiService.generateOpening(context.genre, context.character, context.supportingCharacters, context.worldSettings, aiModel, context.customGenre, context.storyName, customPrompt, context.narrativeMode, context.narrativeTechnique, context.plotBlueprint);
+              } else {
+                  const causedBy = lastSegment.causedBy || "";
+                  newSegment = await GeminiService.advanceStory(historyContext, causedBy, context.genre, context.character, context.supportingCharacters, context.worldSettings, context.memories, aiModel, context.customGenre, customPrompt, context.scheduledEvents || [], context.narrativeMode, context.narrativeTechnique, context.plotBlueprint, mode);
+                  newSegment.causedBy = causedBy;
+              }
+              const nextContext = ((prev: GameContext): GameContext => {
+                  const history = [...prev.history];
+                  const currentSeg = { ...history[lastIdx] };
+                  if (!currentSeg.versions) {
+                      currentSeg.versions = [{ text: currentSeg.text, choices: currentSeg.choices, visualPrompt: currentSeg.visualPrompt, mood: currentSeg.mood, chapterId: currentSeg.chapterId }];
+                      currentSeg.currentVersionIndex = 0;
+                  }
+                  const newVersion = { text: newSegment.text, choices: newSegment.choices, visualPrompt: newSegment.visualPrompt, mood: newSegment.mood, location: newSegment.location, chapterId: newSegment.chapterId };
+                  currentSeg.versions.push(newVersion);
+                  currentSeg.currentVersionIndex = currentSeg.versions.length - 1;
+                  currentSeg.text = newVersion.text;
+                  currentSeg.choices = newVersion.choices;
+                  currentSeg.visualPrompt = newVersion.visualPrompt;
+                  currentSeg.mood = newVersion.mood;
+                  currentSeg.location = newVersion.location;
+                  currentSeg.chapterId = newVersion.chapterId;
+                  history[lastIdx] = currentSeg;
+                  return { ...prev, history, currentSegment: currentSeg, memories: newSegment.newMemories || prev.memories, lastUpdated: Date.now() };
+              })(context);
+              setContext(nextContext);
+              saveGameToStorage(nextContext, SaveType.AUTO);
           }
-          
-          playProgressSound(); 
-      } catch (e) { 
-          console.error("Regenerate failed", e); 
-          setError("重新生成失败"); 
-      } finally { 
-          setIsLoading(false); 
-      } 
+          playProgressSound();
+      } catch (e) {
+          console.error("Regenerate failed", e);
+          setError("重新生成失败");
+      } finally {
+          setIsLoading(false);
+      }
   };
   
-  const handleSwitchVersion = (segmentId: string, direction: 'prev' | 'next') => { playClickSound(); setContext(prev => { const history = [...prev.history]; const idx = history.findIndex(h => h.id === segmentId); if (idx === -1) return prev; const seg = { ...history[idx] }; if (!seg.versions || seg.versions.length < 2) return prev; let newIdx = (seg.currentVersionIndex || 0) + (direction === 'next' ? 1 : -1); if (newIdx < 0) newIdx = seg.versions.length - 1; if (newIdx >= seg.versions.length) newIdx = 0; if (newIdx === seg.currentVersionIndex) return prev; const v = seg.versions[newIdx]; seg.currentVersionIndex = newIdx; seg.text = v.text; seg.choices = v.choices; seg.visualPrompt = v.visualPrompt; seg.mood = v.mood; seg.location = v.location; history[idx] = seg; const isCurrent = prev.currentSegment?.id === segmentId; return { ...prev, history, currentSegment: isCurrent ? seg : prev.currentSegment, lastUpdated: Date.now() }; }); };
+  const handleSwitchVersion = (segmentId: string, direction: 'prev' | 'next') => {
+      playClickSound();
+      const nextContextFunc = (prev: GameContext): GameContext => {
+          const history = [...prev.history];
+          const idx = history.findIndex(h => h.id === segmentId);
+          if (idx === -1) return prev;
+          const seg = { ...history[idx] };
+          if (!seg.versions || seg.versions.length < 2) return prev;
+          let newIdx = (seg.currentVersionIndex || 0) + (direction === 'next' ? 1 : -1);
+          if (newIdx < 0) newIdx = seg.versions.length - 1;
+          if (newIdx >= seg.versions.length) newIdx = 0;
+          if (newIdx === seg.currentVersionIndex) return prev;
+          const v = seg.versions[newIdx];
+          seg.currentVersionIndex = newIdx;
+          seg.text = v.text;
+          seg.choices = v.choices;
+          seg.visualPrompt = v.visualPrompt;
+          seg.mood = v.mood;
+          seg.location = v.location;
+          seg.chapterId = v.chapterId;
+          history[idx] = seg;
+          const isCurrent = prev.currentSegment?.id === segmentId;
+          return { ...prev, history, currentSegment: isCurrent ? seg : prev.currentSegment, lastUpdated: Date.now() };
+      };
+      const nextContext = nextContextFunc(context);
+      if (nextContext !== context) {
+          setContext(nextContext);
+          saveGameToStorage(nextContext, SaveType.AUTO);
+      }
+  };
+  
   const handleGenerateImage = async () => { playClickSound(); if (!context.currentSegment?.visualPrompt || !context.currentSegment?.id) return; toggleModal('image', false); const characterInfo = `Character Name: ${context.character.name}, Gender: ${context.character.gender}, Appearance: ${context.character.trait}`; triggerManualImageGeneration(context.currentSegment.visualPrompt, context.currentSegment.id, selectedImageStyle, characterInfo, customImageStyle, context.character.avatar); };
+
+  const handleRegenerateAvatar = async () => {
+    if (!context.character && !selectedCharacterId) return;
+    playClickSound();
+    toggleModal('avatarGen', false);
+    setGeneratingImage(true);
+    try {
+        const isProtagonist = !selectedCharacterId;
+        const charToRegen = isProtagonist
+            ? context.character
+            : context.supportingCharacters.find(c => c.id === selectedCharacterId);
+
+        if (!charToRegen) throw new Error("Character not found for avatar regeneration.");
+
+        const newAvatar = await GeminiService.generateCharacterAvatar(
+            context.genre,
+            charToRegen,
+            selectedImageStyle,
+            imageModel,
+            customImageStyle,
+            modelScopeApiKey,
+            avatarRefImage
+        );
+
+        if (isProtagonist) {
+            const nextContext = {
+                ...context,
+                character: { ...context.character, avatar: newAvatar },
+                lastUpdated: Date.now()
+            };
+            setContext(nextContext);
+            saveGameToStorage(nextContext, SaveType.AUTO);
+        } else {
+            const nextContext = {
+                ...context,
+                supportingCharacters: context.supportingCharacters.map(sc =>
+                    sc.id === selectedCharacterId ? { ...sc, avatar: newAvatar } : sc
+                ),
+                lastUpdated: Date.now()
+            };
+            setContext(nextContext);
+            saveGameToStorage(nextContext, SaveType.AUTO);
+        }
+    } catch (err: any) {
+        setError(err.message || "Avatar regeneration failed.");
+    } finally {
+        setGeneratingImage(false);
+    }
+  };
 
   return {
     gameState, setGameState, context, setContext, isLoading, loadingProgress, error, setError, modals, toggleModal,
@@ -836,7 +880,7 @@ export const useGameEngine = () => {
     isSummarizing, selectedCharacterId, setSelectedCharacterId, setupTempData, setSetupTempData, showStoryPanelBackground, handleSetShowStoryPanelBackground,
     handleStartGame, handleLoadGame, handleStartNewGameSetup, handleChoice, handleManualSave, handleSaveSetup, importSaveGame,
     handleBackToHome, handleGenerateImage, deleteFromGallery, deleteSaveGame, deleteSession, playClickSound, playHoverSound, handleSummarizeMemory,
-    handleRegenerate, handleSwitchVersion, handleGlobalReplace, handleAbortGame, handleUpgradeSkill,
+    handleRegenerate, handleSwitchVersion, handleGlobalReplace, handleAbortGame, handleUpgradeSkill, handleRegenerateAvatar,
     historyFontSize, handleSetHistoryFontSize, storyFontSize, handleSetStoryFontSize, storyFontFamily, handleSetStoryFontFamily,
     handleAddScheduledEvent, handleUpdateScheduledEvent, handleDeleteScheduledEvent,
     autoSaveGallery, handleSetAutoSaveGallery, isCurrentBgFavorited, toggleCurrentBgFavorite

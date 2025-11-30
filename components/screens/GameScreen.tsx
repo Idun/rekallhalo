@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { SmoothBackground, getSmartBackground, getRandomBackground } from '../SmoothBackground';
 import { TypingText } from '../TypingText';

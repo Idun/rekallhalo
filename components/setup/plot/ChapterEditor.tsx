@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { PlotChapter, SupportingCharacter, ScheduledEvent } from '../../../types';
 
@@ -300,27 +299,37 @@ export const ChapterEditor: React.FC<ChapterEditorProps> = ({
                     <div className="text-[9px] text-gray-400 mb-2">这些事件不局限于当前章节，AI会根据剧情发展灵活插入。</div>
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                        {events.filter(e => e.status === 'pending').map(e => (
+                        {events.length === 0 && (
+                            <div className="text-[10px] text-gray-400 text-center italic py-2 border-2 border-dashed border-stone-100 rounded col-span-full">暂无待触发伏笔</div>
+                        )}
+                        {events.map(e => (
                             <div 
                                 key={e.id} 
-                                onClick={() => onOpenEditEvent(e)}
-                                className="bg-yellow-50 border-l-4 border-yellow-400 p-2 rounded shadow-sm relative group cursor-pointer hover:bg-yellow-100 transition-colors"
+                                onClick={() => e.status !== 'completed' && onOpenEditEvent(e)}
+                                className={`p-2 rounded shadow-sm relative group transition-colors
+                                    ${e.status === 'completed' 
+                                        ? 'bg-green-50 border-l-4 border-green-300 cursor-default'
+                                        : 'bg-yellow-50 border-l-4 border-yellow-400 hover:bg-yellow-100 cursor-pointer'}
+                                `}
                             >
                                 <div className="text-[9px] text-gray-500 flex justify-between font-bold">
                                     <span>{e.type}</span>
-                                    <button 
-                                        onClick={(evt) => { evt.stopPropagation(); onDeleteEvent(e.id); }}
-                                        className="text-red-300 hover:text-red-500 font-bold px-1"
-                                    >
-                                        ✕
-                                    </button>
+                                    {e.status === 'completed' ? (
+                                        <span className="text-green-600 font-bold flex items-center gap-1">✓ 已触发</span>
+                                    ) : (
+                                        <button 
+                                            onClick={(evt) => { evt.stopPropagation(); onDeleteEvent(e.id); }}
+                                            className="text-red-300 hover:text-red-500 font-bold px-1"
+                                        >
+                                            ✕
+                                        </button>
+                                    )}
                                 </div>
-                                <div className="text-[10px] text-gray-800 mt-1 leading-tight line-clamp-2">{e.description}</div>
+                                <div className={`text-[10px] mt-1 leading-tight line-clamp-2 ${e.status === 'completed' ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
+                                    {e.description}
+                                </div>
                             </div>
                         ))}
-                        {events.filter(e => e.status === 'pending').length === 0 && (
-                            <div className="text-[10px] text-gray-400 text-center italic py-2 border-2 border-dashed border-stone-100 rounded col-span-full">暂无待触发伏笔</div>
-                        )}
                     </div>
                 </div>
 

@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect, useRef } from 'react';
-import { GameContext, ImageSize, StoryMood, MOOD_LABELS, SupportingCharacter, Character, SavedGame, StoryGenre, StorySegment, ScheduledEvent } from '../../types';
+import { GameContext, ImageSize, StoryMood, MOOD_LABELS, SupportingCharacter, Character, SavedGame, StoryGenre, StorySegment, ScheduledEvent, PlotChapter } from '../../types';
 import { Button } from '../Button';
 import { GenreAvatar } from '../GenreAvatar';
 
@@ -84,7 +83,60 @@ const toChineseNum = (num: number) => {
     return num.toString(); 
 };
 
-export const HistoryModal = ({ history, onClose, fontSize, fontFamily }: { history: any[], onClose: () => void, fontSize: number, fontFamily?: string }) => {
+// --- Chapter Grouping Component ---
+const ChapterSection = ({ title, segments, fontSize, fontFamily, defaultOpen = false }: { title: string, segments: any[], fontSize: number, fontFamily?: string, defaultOpen?: boolean }) => {
+    const [isOpen, setIsOpen] = useState(defaultOpen);
+
+    return (
+        <div className="border-b border-stone-200 last:border-0">
+            <button 
+                onClick={() => setIsOpen(!isOpen)}
+                className="w-full flex items-center gap-2 p-3 bg-stone-100 hover:bg-stone-200 transition-colors text-left group"
+            >
+                <span className={`transform transition-transform text-stone-400 text-xs ${isOpen ? 'rotate-90' : ''}`}>➤</span>
+                <span className="font-bold text-sm text-stone-700 group-hover:text-purple-700">{title}</span>
+                <span className="text-[10px] text-stone-400 font-mono ml-auto">{segments.length} 幕</span>
+            </button>
+            
+            {isOpen && (
+                <div className="bg-white/50 space-y-6 p-4 border-t border-stone-100">
+                    {segments.map((h, i) => {
+                         const isChoiceMode = h.choices && h.choices.includes(h.causedBy);
+                         const showUserInput = h.causedBy && !isChoiceMode;
+
+                         return (
+                            <div key={h.id || i} className="border-b border-stone-100 pb-4 last:border-0 last:pb-0">
+                                <div className="flex justify-between mb-2">
+                                    <span className="text-[10px] text-purple-600 font-bold uppercase bg-purple-50 px-2 py-0.5 rounded">场景 {i + 1}</span>
+                                    <span className="text-[10px] text-gray-500">{h.activeCharacterName}</span>
+                                </div>
+                                
+                                {showUserInput && (
+                                    <div className="mb-3 p-3 bg-white rounded-lg border-l-4 border-rose-400 shadow-sm text-sm text-gray-700 relative">
+                                        <span className="font-bold text-xs text-rose-500 block mb-1">我的回复:</span>
+                                        {h.causedBy}
+                                    </div>
+                                )}
+    
+                                <p 
+                                    className="text-gray-700 leading-relaxed whitespace-pre-wrap" 
+                                    style={{ 
+                                        fontSize: `${fontSize}px`,
+                                        fontFamily: fontFamily || "'Noto Serif SC', serif"
+                                    }}
+                                >
+                                    {h.text}
+                                </p>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
+};
+
+export const HistoryModal = ({ history, onClose, fontSize, fontFamily, plotBlueprint }: { history: StorySegment[], onClose: () => void, fontSize: number, fontFamily?: string, plotBlueprint?: PlotChapter[] }) => {
     
     const totalWords = history.reduce((acc, cur) => acc + (cur.text?.length || 0), 0);
 
@@ -104,6 +156,51 @@ export const HistoryModal = ({ history, onClose, fontSize, fontFamily }: { histo
         link.click();
         document.body.removeChild(link);
     };
+
+    // Group History by Plot Blueprint
+    const groupedHistory = React.useMemo(() => {
+        if (!plotBlueprint || plotBlueprint.length === 0 || !history || history.length === 0) {
+            return [{ title: "冒险篇章", segments: history, isLast: true }];
+        }
+        
+        const chapterMap = new Map<string, PlotChapter>(plotBlueprint.map(c => [c.id, c]));
+        
+        const groups: { title: string, segments: StorySegment[], isLast: boolean }[] = [];
+        
+        history.forEach(segment => {
+            const chapterId = segment.chapterId;
+            const chapter = chapterId ? chapterMap.get(chapterId) : undefined;
+            const chapterTitle = chapter?.title || "未归档篇章";
+
+            let group = groups.find(g => g.title === chapterTitle);
+            if (!group) {
+                group = { title: chapterTitle, segments: [], isLast: chapter?.status === 'active' };
+                groups.push(group);
+            }
+            group.segments.push(segment);
+        });
+        
+        groups.sort((a, b) => {
+            const aIndex = plotBlueprint.findIndex(c => c.title === a.title);
+            const bIndex = plotBlueprint.findIndex(c => c.title === b.title);
+            if (aIndex === -1) return 1;
+            if (bIndex === -1) return -1;
+            return aIndex - bIndex;
+        });
+
+        const activeChapterTitle = plotBlueprint.find(c => c.status === 'active')?.title;
+        if (activeChapterTitle) {
+            groups.forEach(g => { g.isLast = (g.title === activeChapterTitle); });
+        } else if (groups.length > 0) {
+            groups[groups.length - 1].isLast = true;
+        }
+        
+        if (groups.length === 0) {
+             return [{ title: "冒险篇章", segments: history, isLast: true }];
+        }
+    
+        return groups;
+    }, [history, plotBlueprint]);
 
     return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-6" onClick={onClose}>
@@ -126,46 +223,24 @@ export const HistoryModal = ({ history, onClose, fontSize, fontFamily }: { histo
                         <button onClick={onClose} className="text-gray-400 hover:text-red-500 text-lg px-2 font-bold">✕</button>
                     </div>
                 </div>
-                <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6 bg-stone-100 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
-                    {history.map((h, i) => {
-                         // Check if the input was likely text mode (not in the list of choices)
-                         const isChoiceMode = h.choices && h.choices.includes(h.causedBy);
-                         const showUserInput = h.causedBy && !isChoiceMode;
-
-                         return (
-                            <div key={h.id} className="border-b border-stone-200 pb-4 last:border-0">
-                                <div className="flex justify-between mb-2">
-                                    <span className="text-xs text-purple-600 font-bold uppercase bg-purple-50 px-2 py-0.5 rounded">第{toChineseNum(i + 1)}幕</span>
-                                    <span className="text-[10px] text-gray-500">{h.activeCharacterName}</span>
-                                </div>
-                                
-                                {/* Only show User Input block if it was FREE TEXT input (Text Mode) */}
-                                {showUserInput && (
-                                    <div className="mb-3 p-3 bg-white rounded-lg border-l-4 border-rose-400 shadow-sm text-sm text-gray-700 relative">
-                                        <span className="font-bold text-xs text-rose-500 block mb-1">我的回复:</span>
-                                        {h.causedBy}
-                                    </div>
-                                )}
-    
-                                <p 
-                                    className="text-gray-700 leading-relaxed whitespace-pre-wrap" 
-                                    style={{ 
-                                        fontSize: `${fontSize}px`,
-                                        fontFamily: fontFamily || "'Noto Serif SC', serif"
-                                    }}
-                                >
-                                    {h.text}
-                                </p>
-                            </div>
-                        );
-                    })}
+                <div className="flex-1 overflow-y-auto custom-scrollbar bg-stone-50 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
+                    {groupedHistory.map((group, idx) => (
+                        <ChapterSection 
+                            key={idx} 
+                            title={group.title} 
+                            segments={group.segments} 
+                            fontSize={fontSize} 
+                            fontFamily={fontFamily}
+                            defaultOpen={group.isLast} // Open the last (active) chapter by default
+                        />
+                    ))}
                 </div>
             </div>
         </div>
     );
 };
 
-export const CharacterModal = ({ context, character, onClose }: { context: GameContext, character: Character | SupportingCharacter, onClose: () => void }) => {
+export const CharacterModal = ({ context, character, onClose, onOpenRegenAvatar, isGenerating }: { context: GameContext, character: Character | SupportingCharacter, onClose: () => void, onOpenRegenAvatar: () => void, isGenerating?: boolean }) => {
     const isProtagonist = (character as Character).skills !== undefined;
     const supportChar = !isProtagonist ? (character as SupportingCharacter) : null;
     const traitText = (character as Character).trait || supportChar?.personality || '暂无描述';
@@ -187,6 +262,18 @@ export const CharacterModal = ({ context, character, onClose }: { context: GameC
                     ) : (
                         <div className="w-full h-full flex items-center justify-center text-6xl text-gray-400">👤</div>
                     )}
+
+                    {/* Loading Overlay */}
+                    {isGenerating && (
+                        <div className="absolute inset-0 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center text-white z-10 animate-fade-in-up transition-opacity">
+                            <svg className="animate-spin h-8 w-8 text-white mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span className="text-sm font-bold tracking-widest font-mono">正在重塑形象...</span>
+                        </div>
+                    )}
+                    
                     {/* Minimal overlay for name at bottom of image if desired, or keep clean */}
                     <div className="absolute bottom-0 left-0 w-full p-4 bg-gradient-to-t from-black/60 to-transparent pointer-events-none"></div>
                 </div>
@@ -197,7 +284,16 @@ export const CharacterModal = ({ context, character, onClose }: { context: GameC
                     <div className="p-4 border-b border-stone-200 bg-white sticky top-0 z-10 shrink-0">
                         <div className="flex justify-between items-start">
                              <div>
-                                <h2 className="text-2xl font-bold text-gray-800 mb-1 leading-none">{character.name}</h2>
+                                <h2 className="text-2xl font-bold text-gray-800 mb-1 leading-none flex items-center gap-3">
+                                    <span>{character.name}</span>
+                                    <button 
+                                        onClick={(e) => { e.stopPropagation(); onOpenRegenAvatar(); }}
+                                        className="text-xs font-bold text-indigo-500 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded px-3 py-1 transition-all active:scale-95 shadow-sm"
+                                        title="重新生成形象"
+                                    >
+                                        重塑形象
+                                    </button>
+                                </h2>
                                 <div className="flex items-center gap-2 mt-1">
                                      <span className="text-[10px] font-bold text-white bg-gray-800 px-2 py-0.5 rounded">{context.genre.split(' - ')[0]}</span>
                                      {supportChar && <span className="text-[10px] text-gray-600 bg-stone-200 px-2 py-0.5 rounded border border-stone-300">{supportChar.role}</span>}
@@ -431,6 +527,76 @@ export const ImageGenModal = ({ selectedStyle, onSelectStyle, onGenerate, onClos
                 开始生成
             </button>
             <p className="text-[10px] text-center text-gray-500 mt-3">我们将自动应用画质增强算法以确保最佳效果</p>
+        </div>
+    </div>
+);
+
+export const RegenAvatarModal = ({ 
+    onGenerate, 
+    onClose,
+    selectedStyle,
+    onSelectStyle,
+    customStyle,
+    onCustomStyleChange
+}: { 
+    onGenerate: () => void; 
+    onClose: () => void;
+    selectedStyle: string;
+    onSelectStyle: (s: string) => void;
+    customStyle: string;
+    onCustomStyleChange: (s: string) => void;
+}) => (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+        <div className="bg-stone-100 border border-stone-200 p-6 rounded-xl shadow-2xl max-w-sm w-full text-gray-800 animate-fade-in-up">
+            <div className="flex justify-between items-center mb-4">
+                <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                    重塑形象
+                </h3>
+                <button onClick={onClose} className="text-gray-400 hover:text-gray-800 font-bold">✕</button>
+            </div>
+            
+            <p className="text-sm text-gray-600 mb-6">
+                AI 将根据角色设定与最新的美术风格提示词进行创作。
+            </p>
+
+            <div className="space-y-4 mb-6">
+                <div>
+                    <label className="text-[10px] text-gray-500 uppercase font-bold mb-2 block">基础画风</label>
+                    <div className="grid grid-cols-2 gap-3">
+                        {['anime', 'realistic', '3d', 'ink'].map(style => (
+                            <button 
+                            key={style}
+                            onClick={() => onSelectStyle(style)}
+                            className={`p-3 rounded border text-sm capitalize transition-all ${selectedStyle === style ? 'bg-purple-100 border-purple-500 text-purple-700 shadow-sm' : 'bg-white border-stone-200 text-gray-500 hover:border-gray-400'}`}
+                            >
+                            {style === 'anime' ? '二次元' : style === 'realistic' ? '写实摄影' : style === '3d' ? '3D 渲染' : '水墨国风'}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                {onCustomStyleChange && (
+                    <div>
+                        <label className="text-[10px] text-gray-500 uppercase font-bold mb-2 block">自定义风格指令 (可选)</label>
+                        <input 
+                            type="text" 
+                            value={customStyle || ''}
+                            onChange={(e) => onCustomStyleChange(e.target.value)}
+                            placeholder="例: 梵高星空风格, 赛博朋克霓虹..."
+                            className="w-full bg-white border border-stone-300 rounded px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:border-purple-500 outline-none transition-colors"
+                        />
+                    </div>
+                )}
+            </div>
+
+            <button 
+                onClick={onGenerate}
+                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold font-mono px-8 py-3 clip-path-polygon hover:shadow-lg transition-all active:translate-y-0.5"
+                style={{ clipPath: "polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px)" }}
+            >
+                开始生成
+            </button>
+            <p className="text-[10px] text-center text-gray-500 mt-3">这将消耗图像生成资源。</p>
         </div>
     </div>
 );

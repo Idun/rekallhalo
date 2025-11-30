@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { StoryGenre, Character, StorySegment, ImageSize, SupportingCharacter, StoryMood, generateUUID, WorldSettings, Skill, AvatarStyle, MemoryState, ImageModel, ShotSize, ScheduledEvent, PlotChapter } from '../types';
+// FIX: Corrected typo from NATIVE_STRUCTURES to NARRATIVE_STRUCTURES
 import { WULIN_CONTEXT, WESTERN_FANTASY_CONTEXT, NARRATIVE_STRUCTURES, NARRATIVE_TECHNIQUES } from '../constants';
 
 // Initialize client with the env key.
@@ -131,13 +132,20 @@ export const generateOpening = async (
   const structure = NARRATIVE_STRUCTURES.find(s => s.id === narrativeMode);
   const technique = NARRATIVE_TECHNIQUES.find(t => t.id === narrativeTechnique);
   
+  // If a blueprint exists, it defines the structure. Narrative settings become stylistic hints.
+  const hasBlueprint = plotBlueprint && plotBlueprint.length > 0;
+
   const narrativeInstruction = `
-    [NARRATIVE CONFIGURATION]
-    Structure: ${structure ? `${structure.name} - ${structure.description}` : 'Auto-adapt based on genre'}
-    Technique: ${technique ? `${technique.name} - ${technique.description}` : 'Auto-adapt based on context'}
-    Perspective: ${character.perspective === 'first' ? "FIRST PERSON ('I'/'我')" : character.perspective === 'second' ? "SECOND PERSON ('You'/'你')" : character.perspective === 'omniscient' ? "OMNISCIENT (All-knowing)" : "THIRD PERSON (Standard Novel)"}
-    
-    Make sure the opening reflects this narrative style immediately.
+    [NARRATIVE STYLE]
+    ${hasBlueprint 
+      ? `The story is guided by a plot blueprint. Apply the following as stylistic hints:
+      - Structure Style: ${structure ? structure.name : 'Default'}
+      - Technique Style: ${technique ? technique.name : 'Default'}`
+      : `Apply the following narrative rules:
+      - Structure: ${structure ? `${structure.name} - ${structure.description}` : 'Auto-adapt based on genre'}
+      - Technique: ${technique ? `${technique.name} - ${technique.description}` : 'Auto-adapt based on context'}`
+    }
+    - Perspective: ${character.perspective === 'first' ? "FIRST PERSON ('I'/'我')" : character.perspective === 'second' ? "SECOND PERSON ('You'/'你')" : character.perspective === 'omniscient' ? "OMNISCIENT (All-knowing)" : "THIRD PERSON (Standard Novel)"}
 
     [CHOICES PERSPECTIVE RULE - CRITICAL]
     The text content of the 'choices' MUST match the selected perspective:
@@ -148,9 +156,8 @@ export const generateOpening = async (
   `;
 
   let blueprintInstruction = "";
-  if (plotBlueprint.length > 0) {
-      // Find the first chapter (Chapter 1)
-      const chapter1 = plotBlueprint[0];
+  const chapter1 = plotBlueprint.length > 0 ? plotBlueprint[0] : undefined;
+  if (chapter1) {
       const pacingInstruction = chapter1.pacing === 'fast' 
           ? "PACING: FAST. Jump straight into action. Minimize heavy exposition. High stakes immediately."
           : chapter1.pacing === 'slow' 
@@ -232,6 +239,7 @@ export const generateOpening = async (
           activeCharacterName: json.activeCharacterName,
           location: json.location,
           newMemories: json.memoryUpdate,
+          chapterId: chapter1?.id,
           storyName: json.storyName
       };
   });
@@ -255,14 +263,8 @@ export const advanceStory = async (
     regenerationMode: 'full' | 'text' | 'choices' = 'full'
 ): Promise<StorySegment> => {
     
-    // --- OPTIMIZATION 1: DYNAMIC HISTORY SIZING ---
     const lastTurnIndex = history.length - 1;
     const historyWindow = [];
-    
-    // For regeneration 'choices', we typically want the CURRENT text to be the context
-    // For 'full' or 'text', the current text is what we are replacing, so we look at previous.
-    // However, `useGameEngine` logic strips the current segment for 'full'/'text' before calling this.
-    // So history[lastTurnIndex] is always the "previous validated turn".
     
     if (lastTurnIndex > 0) {
         const prev = history[lastTurnIndex - 1];
@@ -270,15 +272,12 @@ export const advanceStory = async (
     }
     if (lastTurnIndex >= 0) {
         const curr = history[lastTurnIndex];
-        // If we are regenerating choices for the *current* text (which is technically history[lastTurnIndex] in this call context if passed correctly),
-        // we might handle it via special prompts.
         historyWindow.push(`Turn ${lastTurnIndex} (IMMEDIATE PAST): ${curr.text} \nUser Choice/Input: ${curr.causedBy}`);
     }
 
     const shouldInjectFullContext = history.length < 3;
     const worldContext = shouldInjectFullContext ? getWorldContext(genre) : `[Genre: ${genre}]`;
 
-    // --- OPTIMIZATION 3: RELEVANT CHARACTER FILTERING ---
     const lastActiveName = history[lastTurnIndex]?.activeCharacterName || "";
     const sortedChars = [...supportingCharacters].sort((a, b) => 
         ((b.affinity || 0) - (a.affinity || 0)) 
@@ -296,12 +295,19 @@ export const advanceStory = async (
     
     const structure = NARRATIVE_STRUCTURES.find(s => s.id === narrativeMode);
     const technique = NARRATIVE_TECHNIQUES.find(t => t.id === narrativeTechnique);
-    
+    const hasBlueprint = plotBlueprint && plotBlueprint.length > 0;
+
     const narrativeInstruction = `
       [NARRATIVE STYLE]
-      Structure: ${structure ? structure.name : 'Standard'}
-      Technique: ${technique ? technique.name : 'Standard'}
-      Perspective: ${character.perspective === 'first' ? "FIRST PERSON ('I'/'我')" : character.perspective === 'second' ? "SECOND PERSON ('You'/'你')" : character.perspective === 'omniscient' ? "OMNISCIENT" : "THIRD PERSON"}
+      ${hasBlueprint 
+        ? `The story is guided by a plot blueprint. Apply the following as stylistic hints:
+        - Structure Style: ${structure ? structure.name : 'Default'}
+        - Technique Style: ${technique ? technique.name : 'Default'}`
+        : `Apply the following narrative rules:
+        - Structure: ${structure ? `${structure.name} - ${structure.description}` : 'Auto-adapt based on genre'}
+        - Technique: ${technique ? `${technique.name} - ${technique.description}` : 'Auto-adapt based on context'}`
+      }
+      - Perspective: ${character.perspective === 'first' ? "FIRST PERSON ('I'/'我')" : character.perspective === 'second' ? "SECOND PERSON ('You'/'你')" : character.perspective === 'omniscient' ? "OMNISCIENT" : "THIRD PERSON"}
 
       [CHOICES PERSPECTIVE RULE - CRITICAL]
       The text content of the 'choices' MUST match the selected perspective:
@@ -311,7 +317,6 @@ export const advanceStory = async (
       - If 'omniscient': Choices should describe the plot direction. e.g., "The hero draws his sword."
     `;
 
-    // Filter Pending Events
     const pendingEvents = scheduledEvents.filter(e => e.status === 'pending');
     let eventsInstruction = "";
     if (pendingEvents.length > 0) {
@@ -319,44 +324,61 @@ export const advanceStory = async (
         [PENDING GLOBAL EVENTS]
         The user has these floating plot points waiting to happen. If appropriate, weave ONE into the story naturally.
         ${pendingEvents.map(e => `(ID:${e.id}) ${e.type}: ${e.description}`).join('\n')}
-        If triggered, return its ID in 'triggeredEventId'.
+        **CRITICAL**: Only return a 'triggeredEventId' if the event, as described, has been **fully and explicitly completed** within the generated 'text'. A partial match (like matching a keyword) is NOT sufficient. If no event is fully completed, return 'null' for 'triggeredEventId'.
         `;
     }
 
     let blueprintInstruction = "";
+    let pacingAndWordCountInstruction = "Write a story segment of about 250-350 words.";
+    let activeChapter = plotBlueprint.find(c => c.status === 'active');
     if (plotBlueprint.length > 0) {
-        // Find the currently ACTIVE chapter
-        // If no chapter is marked active, default to the first one that isn't completed.
-        let activeChapter = plotBlueprint.find(c => c.status === 'active');
+        let activeChapterIndex = activeChapter ? plotBlueprint.findIndex(c => c.id === activeChapter!.id) : -1;
+
         if (!activeChapter) {
-             activeChapter = plotBlueprint.find(c => c.status !== 'completed') || plotBlueprint[plotBlueprint.length - 1];
+            activeChapterIndex = plotBlueprint.findIndex(c => c.status !== 'completed');
+            if (activeChapterIndex === -1) { // all completed
+                activeChapterIndex = plotBlueprint.length - 1;
+            }
+            activeChapter = plotBlueprint[activeChapterIndex];
         }
 
         if (activeChapter) {
-            const pacingInstruction = activeChapter.pacing === 'fast' 
-                ? "PACING: FAST. Keep scenes short and intense. Advance plot rapidly."
-                : activeChapter.pacing === 'slow' 
-                ? "PACING: SLOW. Focus on conversations, internal monologue, and environmental details."
-                : "PACING: STANDARD.";
+            const pacing = activeChapter.pacing || 'standard';
+            if (pacing === 'slow') {
+                pacingAndWordCountInstruction = "Pacing is SLOW. Focus on rich descriptions, character thoughts, and atmosphere. Generate a longer segment, around 350-450 words.";
+            } else if (pacing === 'fast') {
+                pacingAndWordCountInstruction = "Pacing is FAST. Focus on action, direct dialogue, and moving the plot forward. Generate a concise segment, around 200-250 words.";
+            }
 
-            const completionStatus = activeChapter.trackedStats 
-                ? `Progress: Words(${activeChapter.trackedStats.currentWordCount}/${activeChapter.targetWordCount}), Events(${activeChapter.trackedStats.eventsTriggered}), Interactions(${activeChapter.trackedStats.interactionsCount})` 
-                : "";
+            const pastChapters = plotBlueprint.slice(0, activeChapterIndex);
+            const pastChaptersSummary = pastChapters.length > 0 ? `PAST (Completed Chapters):\n- ${pastChapters.map(c => c.title).join('\n- ')}\n` : 'PAST (Completed Chapters): None.\n';
+
+            const completionStatus = activeChapter.trackedStats ? `Progress: Words(${activeChapter.trackedStats.currentWordCount}/${activeChapter.targetWordCount}), Events(${activeChapter.trackedStats.eventsTriggered}), Interactions(${activeChapter.trackedStats.interactionsCount})` : "";
+            
+            const presentChapterDetails = `
+PRESENT (Current Chapter: ${activeChapter.title}):
+Context: ${activeChapter.summary}
+MANDATORY KEY EVENTS: ${activeChapter.keyEvents}
+Key Characters to include: ${activeChapter.keyCharacters.join(', ')}
+${pacingAndWordCountInstruction}
+${completionStatus}
+Focus on progressing towards these Key Events.
+`;
+
+            const futureChapters = plotBlueprint.slice(activeChapterIndex + 1, activeChapterIndex + 3);
+            const futureChaptersSummary = futureChapters.length > 0 ? `FUTURE (Upcoming Chapters Preview):\n${futureChapters.map(c => `- ${c.title}: ${c.summary}`).join('\n')}\n` : 'FUTURE (Upcoming Chapters Preview): This is the final chapter.\n';
 
             blueprintInstruction = `
-            [CURRENT CHAPTER: ${activeChapter.title}]
-            Context: ${activeChapter.summary}
-            MANDATORY KEY EVENTS: ${activeChapter.keyEvents}
-            Key Characters to include: ${activeChapter.keyCharacters.join(', ')}
-            ${pacingInstruction}
-            ${completionStatus}
-            
-            Focus on progressing towards these Key Events.
+[PLOT BLUEPRINT OVERVIEW]
+This provides the overarching narrative structure. Use this context to guide the story, create foreshadowing, and ensure smooth transitions between chapters.
+
+${pastChaptersSummary}
+${presentChapterDetails}
+${futureChaptersSummary}
             `;
         }
     }
 
-    // --- REGENERATION MODE INSTRUCTIONS ---
     let regenInstruction = "";
     if (regenerationMode === 'choices') {
         regenInstruction = `
@@ -417,6 +439,7 @@ export const advanceStory = async (
       ${regenInstruction}
 
       [RULES]
+      ${pacingAndWordCountInstruction}
       ${customPrompt || ""}
       1. High dialogue ratio.
       2. If 'Recent Story' memory is getting too long (>500 words), SUMMARIZE older events into it and compress.
@@ -429,6 +452,7 @@ export const advanceStory = async (
          - Provide 2-4 distinct options.
          - **PLOT ALIGNMENT**: At least one choice MUST specifically attempt to advance the '[CURRENT CHAPTER]' objectives or trigger a '[PENDING GLOBAL EVENT]'.
          - Do not make choices generic. Make them specific to the current context and plot goals.
+         - Avoid generic options like 'wait and see' or 'look around'. All choices must be proactive and specific to the scene. The primary goal is to provide options that move the story towards the goals outlined in the Plot Blueprint.
 
       Return valid JSON matching the schema.
     `;
@@ -457,7 +481,8 @@ export const advanceStory = async (
                 json.affinityUpdates.reduce((acc: any, curr: any) => ({...acc, [curr.characterName]: curr.change}), {}) 
                 : undefined,
             newMemories: json.memoryUpdate,
-            triggeredEventId: json.triggeredEventId
+            triggeredEventId: json.triggeredEventId,
+            chapterId: activeChapter?.id
         };
     });
 };
@@ -657,13 +682,9 @@ export const generateCharacterAvatar = async (
     refImage?: string
 ): Promise<string> => {
     const visualDesc = char.appearance || char.trait || char.personality || "mysterious figure";
-    
-    // KEY FIX: Do NOT include character name in the prompt to avoid text generation.
-    // Use generic descriptors instead.
     const subject = `A ${char.gender} character`; 
     
-    // "Solo portrait" ensures no other characters. "Pure visual art" discourages text layouts.
-    const prompt = `Solo portrait of ${subject}, ${visualDesc}. ${genre} style. Close up, masterpiece, best quality, pure visual art, no text, no watermark, no signature.`;
+    const prompt = `masterpiece, best quality, close up solo portrait of ${subject}, ${visualDesc}. ${genre} style. ${customStyle}. 参考二次元游戏立绘、Vtuber 皮套设计与插画，形象为日系二次元风，避免美漫风与韩漫“整容感”风格。 pure visual art, no text, no watermark, no signature.`;
     
     return generateSceneImage(prompt, ImageSize.SIZE_1K, style, "", customStyle, modelName, modelScopeKey, ShotSize.CLOSE_UP, refImage);
 };

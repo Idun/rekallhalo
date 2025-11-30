@@ -1,4 +1,3 @@
-
 import React, { useRef, useState, useEffect } from 'react';
 import { PlotChapter, generateUUID, SupportingCharacter } from '../../../types';
 
@@ -19,6 +18,7 @@ interface DraggingAttachedItem {
     value: string;
     label: string;
     type: 'prereq' | 'character' | 'keyEvent' | 'scheduledEvent' | 'summary';
+    isCopy?: boolean; // Flag for copy operation
 }
 
 interface PlotGraphViewProps {
@@ -37,13 +37,15 @@ interface PlotGraphViewProps {
     characters: SupportingCharacter[];
     onRequestCreateEventNode: (x: number, y: number) => void;
     onSnapshot: () => void; // Snapshot callback for undo
+    // New Props for Copy
+    onCopyAttachedItem: (targetId: string, item: DraggingAttachedItem) => void;
 }
 
 export const PlotGraphView: React.FC<PlotGraphViewProps> = ({
     chapters, setChapters, activeChapterId, setActiveChapterId, 
     nodePositions, setNodePositions, onAddChapter, onDeleteChapter,
     floatingNodes, setFloatingNodes, characters, onRequestCreateEventNode,
-    onSnapshot
+    onSnapshot, onCopyAttachedItem
 }) => {
     const [canvasPan, setCanvasPan] = useState<{x: number, y: number}>({ x: 0, y: 0 });
     const [scale, setScale] = useState(1);
@@ -85,6 +87,10 @@ export const PlotGraphView: React.FC<PlotGraphViewProps> = ({
         if (newSet.has(id)) newSet.delete(id);
         else newSet.add(id);
         setExpandedNodeIds(newSet);
+    };
+
+    const handleUpdateSummary = (id: string, newSummary: string) => {
+        setChapters(chapters.map(c => c.id === id ? { ...c, summary: newSummary } : c));
     };
 
     const handleContextMenu = (e: React.MouseEvent) => {
@@ -282,12 +288,16 @@ export const PlotGraphView: React.FC<PlotGraphViewProps> = ({
         if (type === 'keyEvent') label = value.replace(/[\[\]伏笔:]/g, ''); 
         if (type === 'summary') label = value.length > 15 ? value.substring(0, 15) + "..." : value;
 
+        // Check if Ctrl or Meta is held for Copy Mode
+        const isCopy = e.ctrlKey || e.metaKey;
+
         setDraggingAttachedItem({
             sourceChapterId: chapterId,
             field,
             value,
             label,
-            type
+            type,
+            isCopy
         });
         setMousePagePos({ x: e.clientX, y: e.clientY });
     };
@@ -348,7 +358,11 @@ export const PlotGraphView: React.FC<PlotGraphViewProps> = ({
         }
         
         if (draggingAttachedItem && dropTargetId) {
-            if (dropTargetId !== draggingAttachedItem.sourceChapterId) {
+            if (draggingAttachedItem.isCopy) {
+                // Copy Logic: Add to target, don't remove from source
+                onCopyAttachedItem(dropTargetId, draggingAttachedItem);
+            } else if (dropTargetId !== draggingAttachedItem.sourceChapterId) {
+                // Move Logic: Remove from source, add to target
                 moveAttachedItem(draggingAttachedItem, dropTargetId);
             }
         }
@@ -651,90 +665,110 @@ export const PlotGraphView: React.FC<PlotGraphViewProps> = ({
                     const keyEventList = chapter.keyEvents ? chapter.keyEvents.split(/[;；]/).filter(s => s.trim()) : [];
 
                     return (
-                        <div 
-                            key={chapter.id}
-                            onMouseDown={(e) => handleNodeMouseDown(e, chapter.id)}
-                            onMouseEnter={() => setHoveredNodeId(chapter.id)}
-                            onMouseLeave={() => setHoveredNodeId(null)}
-                            onClick={(e) => { e.stopPropagation(); setActiveChapterId(chapter.id); }}
-                            onDoubleClick={(e) => { e.stopPropagation(); setActiveChapterId(chapter.id); }}
-                            className={`absolute w-64 bg-white rounded-xl shadow-md border-2 transition-all duration-300 flex flex-col stop-propagation
-                                ${isDropTarget ? 'border-green-500 ring-4 ring-green-500/20 scale-105 z-50' : isActive ? 'border-cyan-500 ring-4 ring-cyan-500/10 z-20 scale-105' : 'border-stone-200 hover:border-cyan-300 z-10'}
-                                ${isCompleted ? 'border-green-500 bg-green-50/30' : ''}
-                                ${isHovered && !isActive && !isDropTarget ? 'shadow-xl -translate-y-1' : ''}
-                            `}
-                            style={{ left: pos.x, top: pos.y }}
-                        >
-                            <div className="p-3 pb-2">
-                                <div className={`w-8 h-1 rounded-full mx-auto mb-2 transition-colors ${isActive ? 'bg-cyan-500' : 'bg-stone-200'}`}></div>
-                                <div className="text-[10px] font-bold text-gray-400 uppercase mb-1 flex justify-between items-center">
-                                    <span className="select-none">第 {i + 1} 章</span>
-                                    <div className="flex items-center gap-1">
-                                        {isCompleted && <span className="text-green-600">✓</span>}
-                                        <button 
-                                            onClick={(e) => onDeleteChapter(chapter.id, e)}
-                                            className="text-stone-300 hover:text-red-500 font-bold px-1 transition-colors"
-                                            title="删除"
-                                        >
-                                            ✕
-                                        </button>
+                        <React.Fragment key={chapter.id}>
+                            <div 
+                                onMouseDown={(e) => handleNodeMouseDown(e, chapter.id)}
+                                onMouseEnter={() => setHoveredNodeId(chapter.id)}
+                                onMouseLeave={() => setHoveredNodeId(null)}
+                                onClick={(e) => { e.stopPropagation(); setActiveChapterId(chapter.id); }}
+                                onDoubleClick={(e) => { e.stopPropagation(); setActiveChapterId(chapter.id); }}
+                                className={`absolute w-64 bg-white rounded-xl shadow-md border-2 transition-all duration-300 flex flex-col stop-propagation
+                                    ${isDropTarget ? 'border-green-500 ring-4 ring-green-500/20 scale-105 z-50' : isActive ? 'border-cyan-500 ring-4 ring-cyan-500/10 z-20 scale-105' : 'border-stone-200 hover:border-cyan-300 z-10'}
+                                    ${isCompleted ? 'border-green-500 bg-green-50/30' : ''}
+                                    ${isHovered && !isActive && !isDropTarget ? 'shadow-xl -translate-y-1' : ''}
+                                `}
+                                style={{ left: pos.x, top: pos.y }}
+                            >
+                                <div className="p-3 pb-2 relative">
+                                    <div className={`w-8 h-1 rounded-full mx-auto mb-2 transition-colors ${isActive ? 'bg-cyan-500' : 'bg-stone-200'}`}></div>
+                                    <div className="text-[10px] font-bold text-gray-400 uppercase mb-1 flex justify-between items-center pr-2">
+                                        <span className="select-none">第 {i + 1} 章</span>
+                                        <div className="flex items-center gap-1">
+                                            {isCompleted && <span className="text-green-600">✓</span>}
+                                            <button 
+                                                onClick={(e) => { e.stopPropagation(); onDeleteChapter(chapter.id, e); }}
+                                                onMouseDown={(e) => e.stopPropagation()}
+                                                className="text-stone-300 hover:text-red-500 font-bold px-1 transition-colors"
+                                                title="删除"
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="font-bold text-sm text-gray-800 line-clamp-1 select-none mb-2 pr-1">{chapter.title}</div>
+                                    
+                                    {/* Attached Constraints Area */}
+                                    <div className="flex flex-wrap gap-1 min-h-[20px]">
+                                        {chapter.prerequisites && chapter.prerequisites.map((req, idx) => (
+                                            <button 
+                                                key={`pre-${idx}`} 
+                                                onMouseDown={(e) => handleAttachedItemDragStart(e, chapter.id, 'prerequisites', req, 'prereq')}
+                                                onClick={(e) => { e.stopPropagation(); openEditAttached(chapter.id, 'prerequisites', idx, req); }}
+                                                className="text-[9px] bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded hover:bg-amber-100 hover:border-amber-400 transition-colors max-w-full truncate cursor-grab active:cursor-grabbing"
+                                                title={`🔒 ${req} (按住Ctrl拖拽可复制)`}
+                                            >
+                                                🔒 {req}
+                                            </button>
+                                        ))}
+                                        {chapter.keyCharacters && chapter.keyCharacters.map((char, idx) => (
+                                            <button 
+                                                key={`char-${idx}`}
+                                                onMouseDown={(e) => handleAttachedItemDragStart(e, chapter.id, 'keyCharacters', char, 'character')}
+                                                onClick={(e) => { e.stopPropagation(); openEditAttached(chapter.id, 'keyCharacters', idx, char); }}
+                                                className="text-[9px] bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded hover:bg-blue-100 hover:border-blue-400 transition-colors max-w-full truncate cursor-grab active:cursor-grabbing"
+                                                title={`👤 ${char} (按住Ctrl拖拽可复制)`}
+                                            >
+                                                👤 {char}
+                                            </button>
+                                        ))}
+                                        {keyEventList.map((evt, idx) => (
+                                            <button 
+                                                key={`evt-${idx}`}
+                                                onMouseDown={(e) => handleAttachedItemDragStart(e, chapter.id, 'keyEvents', evt, evt.includes('伏笔') ? 'scheduledEvent' : 'keyEvent')}
+                                                onClick={(e) => { e.stopPropagation(); openEditAttached(chapter.id, 'keyEvents', idx, evt); }}
+                                                className={`text-[9px] px-1.5 py-0.5 rounded hover:opacity-80 border transition-colors max-w-full truncate text-left cursor-grab active:cursor-grabbing ${evt.includes('伏笔') ? 'bg-purple-50 text-purple-700 border-purple-200 hover:border-purple-400' : 'bg-red-50 text-red-700 border-red-200 hover:border-red-400'}`}
+                                                title={`${evt} (按住Ctrl拖拽可复制)`}
+                                            >
+                                                {evt.includes('伏笔') ? '🔮' : '⚡'} {evt.replace(/[\[\]伏笔:]/g, '')}
+                                            </button>
+                                        ))}
                                     </div>
                                 </div>
-                                <div className="font-bold text-sm text-gray-800 line-clamp-1 select-none mb-2">{chapter.title}</div>
                                 
-                                {/* Attached Constraints Area */}
-                                <div className="flex flex-wrap gap-1 min-h-[20px]">
-                                    {chapter.prerequisites && chapter.prerequisites.map((req, idx) => (
-                                        <button 
-                                            key={`pre-${idx}`} 
-                                            onMouseDown={(e) => handleAttachedItemDragStart(e, chapter.id, 'prerequisites', req, 'prereq')}
-                                            onClick={(e) => { e.stopPropagation(); openEditAttached(chapter.id, 'prerequisites', idx, req); }}
-                                            className="text-[9px] bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded hover:bg-amber-100 hover:border-amber-400 transition-colors max-w-full truncate cursor-grab active:cursor-grabbing"
-                                            title={req}
-                                        >
-                                            🔒 {req}
-                                        </button>
-                                    ))}
-                                    {chapter.keyCharacters && chapter.keyCharacters.map((char, idx) => (
-                                        <button 
-                                            key={`char-${idx}`}
-                                            onMouseDown={(e) => handleAttachedItemDragStart(e, chapter.id, 'keyCharacters', char, 'character')}
-                                            onClick={(e) => { e.stopPropagation(); openEditAttached(chapter.id, 'keyCharacters', idx, char); }}
-                                            className="text-[9px] bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded hover:bg-blue-100 hover:border-blue-400 transition-colors max-w-full truncate cursor-grab active:cursor-grabbing"
-                                            title={char}
-                                        >
-                                            👤 {char}
-                                        </button>
-                                    ))}
-                                    {keyEventList.map((evt, idx) => (
-                                        <button 
-                                            key={`evt-${idx}`}
-                                            onMouseDown={(e) => handleAttachedItemDragStart(e, chapter.id, 'keyEvents', evt, evt.includes('伏笔') ? 'scheduledEvent' : 'keyEvent')}
-                                            onClick={(e) => { e.stopPropagation(); openEditAttached(chapter.id, 'keyEvents', idx, evt); }}
-                                            className={`text-[9px] px-1.5 py-0.5 rounded hover:opacity-80 border transition-colors max-w-full truncate text-left cursor-grab active:cursor-grabbing ${evt.includes('伏笔') ? 'bg-purple-50 text-purple-700 border-purple-200 hover:border-purple-400' : 'bg-red-50 text-red-700 border-red-200 hover:border-red-400'}`}
-                                            title={evt}
-                                        >
-                                            {evt.includes('伏笔') ? '🔮' : '⚡'} {evt.replace(/[\[\]伏笔:]/g, '')}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                            {isExpanded && chapter.summary && (
-                                <div 
-                                    onMouseDown={(e) => handleAttachedItemDragStart(e, chapter.id, 'summary', chapter.summary, 'summary')}
-                                    className="px-3 pb-3 text-[10px] text-gray-500 leading-tight border-t border-stone-100 pt-2 animate-fade-in-up bg-stone-50/50 rounded-b-xl cursor-grab active:cursor-grabbing hover:bg-stone-100 transition-colors"
-                                    title="拖拽可转移至其他章节"
+                                {/* Summary Section - Editable Textarea */}
+                                {isExpanded && (
+                                    <div className="px-2 pb-2 border-t border-stone-100 pt-2 bg-stone-50/50 rounded-b-xl animate-fade-in-up">
+                                        <div className="flex items-start gap-1">
+                                            <textarea
+                                                value={chapter.summary || ''}
+                                                onChange={(e) => handleUpdateSummary(chapter.id, e.target.value)}
+                                                placeholder="输入本章剧情摘要..."
+                                                className="w-full text-[10px] text-gray-600 bg-transparent border border-transparent hover:border-stone-200 focus:border-cyan-300 rounded p-1 resize-none outline-none leading-tight h-20 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']"
+                                                onMouseDown={(e) => e.stopPropagation()}
+                                                onWheel={(e) => e.stopPropagation()}
+                                            />
+                                            {/* Drag Handle for Summary */}
+                                            <button
+                                                onMouseDown={(e) => handleAttachedItemDragStart(e, chapter.id, 'summary', chapter.summary, 'summary')}
+                                                className="cursor-grab active:cursor-grabbing text-stone-300 hover:text-cyan-500 p-1 flex-shrink-0"
+                                                title="拖拽可复制/移动摘要"
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3 h-3">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" />
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                                <button 
+                                    onClick={(e) => { e.stopPropagation(); toggleNodeExpand(chapter.id); }}
+                                    className="w-full h-4 flex items-center justify-center text-[8px] text-gray-300 hover:text-cyan-500 hover:bg-stone-50 transition-colors rounded-b-xl border-t border-transparent hover:border-stone-100"
                                 >
-                                    {chapter.summary}
-                                </div>
-                            )}
-                            <button 
-                                onClick={(e) => { e.stopPropagation(); toggleNodeExpand(chapter.id); }}
-                                className="w-full h-4 flex items-center justify-center text-[8px] text-gray-300 hover:text-cyan-500 hover:bg-stone-50 transition-colors rounded-b-xl border-t border-transparent hover:border-stone-100"
-                            >
-                                {isExpanded ? '▲' : '▼'}
-                            </button>
-                        </div>
+                                    {isExpanded ? '▲' : '▼'}
+                                </button>
+                            </div>
+                            
+                        </React.Fragment>
                     );
                 })}
             </div>
@@ -762,8 +796,9 @@ export const PlotGraphView: React.FC<PlotGraphViewProps> = ({
                     className="fixed z-[999] pointer-events-none px-3 py-1.5 rounded-full shadow-2xl font-bold text-xs bg-white border-2 border-cyan-500 text-cyan-700 opacity-90 transform -translate-x-1/2 -translate-y-1/2 flex items-center gap-2"
                     style={{ left: mousePagePos.x, top: mousePagePos.y }}
                 >
-                    <span>{draggingAttachedItem.type === 'prereq' ? '🔒' : draggingAttachedItem.type === 'character' ? '👤' : draggingAttachedItem.type === 'summary' ? '📝' : '⚡'}</span>
+                    <span className="text-lg">{draggingAttachedItem.isCopy ? '✚' : (draggingAttachedItem.type === 'prereq' ? '🔒' : draggingAttachedItem.type === 'character' ? '👤' : draggingAttachedItem.type === 'summary' ? '📝' : '⚡')}</span>
                     <span>{draggingAttachedItem.label}</span>
+                    {draggingAttachedItem.isCopy && <span className="bg-cyan-100 text-cyan-800 text-[8px] px-1 rounded ml-1">复制</span>}
                 </div>
             )}
 

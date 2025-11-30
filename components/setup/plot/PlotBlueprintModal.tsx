@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { PlotChapter, GameContext, ScheduledEvent, generateUUID } from '../../../types';
 import { AddEventModal } from '../../modals/GameplayModals';
@@ -224,6 +223,34 @@ export const PlotBlueprintModal: React.FC<PlotBlueprintModalProps> = ({
         setNodePositions(newPositions);
     };
 
+    // --- Copy Logic for Graph View ---
+    const handleCopyAttachedItem = (targetId: string, item: any) => {
+        const targetChapter = chapters.find(c => c.id === targetId);
+        if (!targetChapter) return;
+
+        pushHistory(); // Save state
+
+        const add = (chap: PlotChapter) => {
+            let newChap = { ...chap };
+            if (item.field === 'summary') {
+                newChap.summary = newChap.summary ? (newChap.summary + '\n' + item.value) : item.value;
+            } else if (item.field === 'keyEvents') {
+                const arr = (newChap.keyEvents || "").split(/[;；]/).filter(s => s.trim());
+                if (!arr.includes(item.value)) arr.push(item.value);
+                newChap.keyEvents = arr.join('；');
+            } else {
+                const arr = [...(newChap[item.field] as string[] || [])];
+                if (!arr.includes(item.value)) arr.push(item.value);
+                // @ts-ignore
+                newChap[item.field] = arr;
+            }
+            return newChap;
+        };
+
+        const updatedChapters = chapters.map(c => c.id === targetId ? add(c) : c);
+        setChapters(updatedChapters);
+    };
+
     // Event Management
     const handleAddEvent = (eventData: Omit<ScheduledEvent, 'id' | 'createdTurn' | 'status'>) => {
         const newEvent: ScheduledEvent = {
@@ -296,10 +323,17 @@ export const PlotBlueprintModal: React.FC<PlotBlueprintModalProps> = ({
                 {/* Left Panel: Grows to full width if viewMode is 'graph' */}
                 <div className={`flex flex-col h-1/3 md:h-full overflow-hidden shrink-0 transition-all duration-300 ${viewMode === 'graph' ? 'w-full bg-stone-100' : 'w-full md:w-72 bg-stone-50 border-r border-stone-200 relative'}`}>
                     <div className={`p-5 border-b border-stone-200 bg-stone-100 flex justify-between items-center ${viewMode === 'graph' ? 'absolute top-0 left-0 right-0 z-[70] bg-white/90 backdrop-blur-sm shadow-sm' : ''}`}>
-                        <h3 className="text-lg font-bold text-cyan-800 tracking-widest uppercase flex items-center gap-2">
-                            <span>剧情细纲</span>
-                            {viewMode === 'graph' && <span className="text-[10px] bg-cyan-100 text-cyan-700 px-2 rounded-full">思维导图模式</span>}
-                        </h3>
+                        <div className="flex items-center">
+                            <h3 className="text-lg font-bold text-cyan-800 tracking-widest uppercase flex items-center gap-2">
+                                <span>剧情细纲</span>
+                                {viewMode === 'graph' && <span className="text-[10px] bg-cyan-100 text-cyan-700 px-2 rounded-full">思维导图模式</span>}
+                            </h3>
+                            {viewMode === 'graph' && (
+                                <span className="hidden md:inline-block text-[9px] text-gray-400 ml-4 font-normal bg-white/50 px-2 py-1 rounded border border-gray-100">
+                                    右键新建卡片 | Ctrl+拖拽节点内卡片可复制
+                                </span>
+                            )}
+                        </div>
                         <div className="flex gap-2">
                             {viewMode === 'graph' && (
                                 <>
@@ -396,6 +430,7 @@ export const PlotBlueprintModal: React.FC<PlotBlueprintModalProps> = ({
                                 characters={characters}
                                 onRequestCreateEventNode={handleRequestCreateEventNode}
                                 onSnapshot={pushHistory} // Snapshot callback for memo undo
+                                onCopyAttachedItem={handleCopyAttachedItem}
                             />
                         )}
                     </div>

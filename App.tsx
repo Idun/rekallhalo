@@ -11,7 +11,7 @@ import { LoadGameScreen } from './components/screens/LoadGameScreen';
 
 // Modals
 import { GalleryModal, ImageViewer, SettingsModal } from './components/modals/SystemModals';
-import { ExitConfirmModal, RegenConfirmModal, HistoryModal, CharacterModal, SkillModal, ImageGenModal } from './components/modals/GameplayModals';
+import { ExitConfirmModal, RegenConfirmModal, HistoryModal, CharacterModal, SkillModal, ImageGenModal, RegenAvatarModal } from './components/modals/GameplayModals';
 
 const App: React.FC = () => {
   const game = useGameEngine();
@@ -225,6 +225,7 @@ const App: React.FC = () => {
                 onClose={() => game.toggleModal('history', false)} 
                 fontSize={game.historyFontSize}
                 fontFamily={game.storyFontFamily}
+                plotBlueprint={game.context.plotBlueprint}
             />
         )}
 
@@ -232,7 +233,20 @@ const App: React.FC = () => {
             <CharacterModal 
                 context={game.context} 
                 character={viewingCharacter as any}
-                onClose={() => game.toggleModal('character', false)} 
+                onClose={() => game.toggleModal('character', false)}
+                onOpenRegenAvatar={() => game.toggleModal('avatarGen', true)}
+                isGenerating={game.generatingImage}
+            />
+        )}
+        
+        {game.modals.avatarGen && (
+            <RegenAvatarModal
+                onGenerate={game.handleRegenerateAvatar}
+                onClose={() => game.toggleModal('avatarGen', false)}
+                selectedStyle={game.selectedImageStyle}
+                onSelectStyle={game.setSelectedImageStyle}
+                customStyle={game.customImageStyle}
+                onCustomStyleChange={game.setCustomImageStyle}
             />
         )}
 

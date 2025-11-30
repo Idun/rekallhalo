@@ -162,6 +162,7 @@ export interface StorySegmentVersion {
   visualPrompt: string;
   mood: StoryMood;
   location?: string;
+  chapterId?: string;
 }
 
 export interface StorySegment {
@@ -178,6 +179,7 @@ export interface StorySegment {
   newMemories?: MemoryState; // Updated memories from this turn
   causedBy?: string; // New: The user choice/input that triggered this segment
   triggeredEventId?: string; // New: ID of the scheduled event that was realized in this segment
+  chapterId?: string; // New: The ID of the plot blueprint chapter this belongs to
   
   // Versioning
   versions?: StorySegmentVersion[];
