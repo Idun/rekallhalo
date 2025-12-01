@@ -1,3 +1,4 @@
+
 import React, { useEffect } from 'react';
 import { GameState } from './types';
 import { useGameEngine } from './hooks/useGameEngine';
@@ -63,6 +64,8 @@ const App: React.FC = () => {
                 tempData={game.setupTempData}
                 setTempData={game.setSetupTempData}
                 playClickSound={game.playClickSound}
+                handleAutoPlanBlueprint={game.handleAutoPlanBlueprint}
+                isGeneratingBlueprint={game.isLoading}
             />
         )}
 

@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { StoryGenre, Character, StorySegment, ImageSize, SupportingCharacter, StoryMood, generateUUID, WorldSettings, Skill, AvatarStyle, MemoryState, ImageModel, ShotSize, ScheduledEvent, PlotChapter } from '../types';
 // FIX: Corrected typo from NATIVE_STRUCTURES to NARRATIVE_STRUCTURES
@@ -61,15 +62,35 @@ const getWorldContext = (genre: StoryGenre): string => {
 
 const cleanJson = (text: string): string => {
   if (!text) return "{}";
-  let cleaned = text;
-  cleaned = cleaned.replace(/```json\s*/gi, '').replace(/```\s*$/g, '');
+  let cleaned = text.replace(/```json\s*|```/gi, '').trim();
+  
+  // Robustly find the start and end of the JSON structure
   const firstBrace = cleaned.indexOf('{');
-  const lastBrace = cleaned.lastIndexOf('}');
-  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace >= firstBrace) {
-    cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+  const firstBracket = cleaned.indexOf('[');
+  
+  let startIndex = -1;
+  let endIndex = -1;
+  let isArray = false;
+
+  // Determine if it's an object or an array based on which comes first
+  if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+      startIndex = firstBrace;
+      endIndex = cleaned.lastIndexOf('}');
+  } else if (firstBracket !== -1) {
+      startIndex = firstBracket;
+      endIndex = cleaned.lastIndexOf(']');
+      isArray = true;
   }
+  
+  if (startIndex !== -1 && endIndex !== -1 && endIndex >= startIndex) {
+      cleaned = cleaned.substring(startIndex, endIndex + 1);
+  } else {
+      // Fallback: if structure is broken, try to wrap if it looks like a list
+      return "{}"; 
+  }
+  
   cleaned = cleaned.replace(/[\x00-\x09\x0B-\x1F\x7F]/g, '');
-  return cleaned.trim();
+  return cleaned.trim() || (isArray ? "[]" : "{}");
 };
 
 const storyResponseSchema = {
@@ -151,7 +172,7 @@ export const generateOpening = async (
     The text content of the 'choices' MUST match the selected perspective:
     - If 'first' ('I'): Choices should use "I" or imply self-action. e.g., "I draw my sword." or "Ask him about the map."
     - If 'second' ('You'): Choices should use "You" or Imperative. e.g., "Draw your sword."
-    - If 'third' ('He/She/Name'): Choices should use the character's name or He/She. e.g., "${character.name} draws his sword."
+    - If 'third' ('He/She/Name'): Choices should use "He"/"She" or the character's name. e.g., "${character.name} draws his sword."
     - If 'omniscient': Choices should describe the plot direction. e.g., "The hero draws his sword."
   `;
 
@@ -485,6 +506,243 @@ ${futureChaptersSummary}
             chapterId: activeChapter?.id
         };
     });
+};
+
+// --- Dynamic Plot Generation Functions ---
+
+export const autoPlanBlueprint = async (
+    genre: StoryGenre,
+    character: Character,
+    worldSettings: WorldSettings,
+    outline: string,
+    existingCharacters: SupportingCharacter[] = [],
+    existingChapters: PlotChapter[] = [],
+    config: { chapterCount: number, wordCountRange: [number, number], newCharCount: number } = { chapterCount: 3, wordCountRange: [3000, 5000], newCharCount: 3 },
+    narrativeMode?: string,
+    narrativeTechnique?: string
+): Promise<{ chapters: PlotChapter[], newCharacters: any[] }> => {
+    
+    // Determine mode: Continuation or Fresh Start
+    const isContinuation = existingChapters.length > 0;
+    
+    // Resolve Narrative Settings
+    const structure = NARRATIVE_STRUCTURES.find(s => s.id === narrativeMode);
+    const technique = NARRATIVE_TECHNIQUES.find(t => t.id === narrativeTechnique);
+
+    const narrativeInstruction = `
+    [NARRATIVE ARCHITECTURE]
+    - Structure: ${structure ? `${structure.name} (${structure.description})` : 'Standard Linear'}
+    - Technique: ${technique ? `${technique.name} (${technique.description})` : 'Standard'}
+    
+    **CRITICAL INSTRUCTION**: You MUST structure the plot chapters to reflect the selected Narrative Structure and Technique. 
+    - If "Non-linear", the chapter sequence should reflect temporal jumps.
+    - If "Parallel Narrative", chapters should alternate between perspectives or storylines.
+    - If "Embedded Narrative", plan chapters that serve as frames or nested stories.
+    `;
+
+    // Construct Prompt Context
+    let contextInstruction = "";
+    if (isContinuation) {
+        // Optimize Token Usage: Only send last 1-2 chapters summary
+        const recentChapters = existingChapters.slice(-2);
+        const summaries = recentChapters.map(c => `Chapter [${c.title}]: ${c.summary}`).join('\n');
+        
+        contextInstruction = `
+        [EXISTING PLOT CONTEXT]
+        The story is already in progress. 
+        Recent Chapters Summary:
+        ${summaries}
+        
+        [TASK]
+        Generate ${config.chapterCount} NEW subsequent chapters that naturally continue the story arc from the above point.
+        DO NOT regenerate existing chapters. Start from the next logical plot point.
+        `;
+    } else {
+        contextInstruction = `
+        [TASK]
+        Design a fresh plot blueprint from scratch.
+        Generate the first ${config.chapterCount} chapters of the story.
+        `;
+    }
+
+    const prompt = `
+    Role: Professional Novel Editor and Plot Architect.
+    
+    [INPUTS]
+    - Genre: ${genre}
+    - Protagonist: ${character.name} (${character.gender}, ${character.trait})
+    - Tone: ${worldSettings.tone}
+    - Outline/Theme: "${outline || 'Standard genre progression'}"
+    - Harem: ${worldSettings.isHarem}, System: ${worldSettings.hasSystem}
+    
+    ${narrativeInstruction}
+
+    ${contextInstruction}
+
+    [CONFIGURATION]
+    - Target Word Count per Chapter: ${config.wordCountRange[0]} - ${config.wordCountRange[1]}
+    - New Characters needed: Approx ${config.newCharCount} (if story requires)
+
+    [EXISTING CHARACTERS]
+    The user has already defined these characters. **PRIORITIZE** using them in 'keyCharacters' where appropriate:
+    ${existingCharacters.map(c => `- ${c.name} (${c.role})`).join('\n')}
+
+    [STRICT CONSTRAINTS]
+    1. **Language**: STRICTLY SIMPLIFIED CHINESE ONLY. No English.
+    2. **Conciseness**: Limit summary to ~100 words. Bullet-point style.
+    3. **Titles**: Short, punchy (2-6 chars). 4-char idioms preferred for Wuxia/Xianxia.
+    4. **Key Characters**: Mix existing characters with new ones.
+    5. **New Characters**: If you introduce new key roles not in the existing list, add them to 'newCharacters' output.
+       - IMPORTANT: Assign random genders (Male, Female, or Other) to new characters to ensure variety.
+
+    Output a JSON object with two fields:
+    1. "chapters": Array of PlotChapter objects (size: ${config.chapterCount}).
+    2. "newCharacters": Array of objects for NEW characters introduced.
+       Schema for newCharacters: { "name": "string", "role": "string", "gender": "male|female|other", "personality": "string", "appearance": "string", "archetype": "string" }
+    `;
+
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+        config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    chapters: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                title: { type: Type.STRING },
+                                summary: { type: Type.STRING },
+                                targetWordCount: { type: Type.INTEGER },
+                                keyEvents: { type: Type.STRING },
+                                keyCharacters: { type: Type.ARRAY, items: { type: Type.STRING } },
+                                pacing: { type: Type.STRING, enum: ['fast', 'standard', 'slow'] }
+                            }
+                        }
+                    },
+                    newCharacters: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                name: { type: Type.STRING },
+                                role: { type: Type.STRING },
+                                gender: { type: Type.STRING, enum: ['male', 'female', 'other'] },
+                                personality: { type: Type.STRING },
+                                appearance: { type: Type.STRING },
+                                archetype: { type: Type.STRING }
+                            },
+                            required: ["name", "role", "gender"]
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    let rawData;
+    try {
+        const cleaned = cleanJson(response.text || "{}");
+        rawData = JSON.parse(cleaned);
+    } catch (e) {
+        console.error("JSON parse error:", e);
+        throw e;
+    }
+
+    // Support both direct array return (legacy/fallback) and object return
+    let rawChapters = [];
+    let newChars = [];
+
+    if (Array.isArray(rawData)) {
+        rawChapters = rawData;
+    } else {
+        if (rawData.chapters && Array.isArray(rawData.chapters)) {
+            rawChapters = rawData.chapters;
+        }
+        if (rawData.newCharacters && Array.isArray(rawData.newCharacters)) {
+            newChars = rawData.newCharacters;
+        }
+    }
+
+    const processedChapters = rawChapters.map((c: any) => ({
+        ...c,
+        id: generateUUID(),
+        status: 'pending',
+        trackedStats: { currentWordCount: 0, eventsTriggered: 0, interactionsCount: 0 },
+        completionCriteria: { minKeyEvents: 1, minInteractions: 1 },
+        prerequisites: [],
+        pacing: c.pacing || 'standard',
+        // Ensure word count respects config if model hallucinated
+        targetWordCount: Math.max(config.wordCountRange[0], Math.min(c.targetWordCount || 3000, config.wordCountRange[1]))
+    }));
+
+    return {
+        chapters: processedChapters,
+        newCharacters: newChars
+    };
+};
+
+export const generateNextChapter = async (
+    prevChapters: PlotChapter[],
+    currentContext: string,
+    worldSettings: WorldSettings,
+    pendingEvents: ScheduledEvent[]
+): Promise<PlotChapter> => {
+    const lastChapter = prevChapters[prevChapters.length - 1];
+    const pendingEventsText = pendingEvents.filter(e => e.status === 'pending').map(e => `${e.type}: ${e.description}`).join('; ');
+
+    const prompt = `
+    Role: Story Director.
+    Task: The user has finished the planned chapters. Generate the NEXT chapter blueprint to continue the story infinitely.
+    
+    [CONTEXT]
+    - Previous Chapters: ${prevChapters.map(c => c.title).slice(-3).join(', ')}...
+    - Last Chapter Summary: ${lastChapter?.summary}
+    - Current Story Context: ${currentContext.substring(0, 500)}...
+    - Pending Scheduled Events (MUST incorporate one if possible): ${pendingEventsText}
+    - Tone: ${worldSettings.tone}
+
+    [REQUIREMENTS]
+    1. **Language**: STRICTLY SIMPLIFIED CHINESE. No English.
+    2. **Conciseness**: Keep summaries brief (~100 words).
+    3. MAINTAIN CONSISTENCY: The title style must match previous chapters (short, Chinese only).
+    4. PLOT PROGRESSION: Introduce a new conflict, journey, or revelation that naturally follows the last chapter.
+    5. If there are pending events, ensure the 'keyEvents' of this new chapter provide an opportunity to trigger them.
+
+    Output a SINGLE 'PlotChapter' object JSON.
+    `;
+
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+        config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    title: { type: Type.STRING },
+                    summary: { type: Type.STRING },
+                    targetWordCount: { type: Type.INTEGER },
+                    keyEvents: { type: Type.STRING },
+                    keyCharacters: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    pacing: { type: Type.STRING }
+                }
+            }
+        }
+    });
+
+    const rawChapter = JSON.parse(cleanJson(response.text || "{}"));
+    return {
+        ...rawChapter,
+        id: generateUUID(),
+        status: 'pending',
+        trackedStats: { currentWordCount: 0, eventsTriggered: 0, interactionsCount: 0 },
+        completionCriteria: { minKeyEvents: 1, minInteractions: 1 },
+        prerequisites: [lastChapter?.title ? `完成章节: ${lastChapter.title}` : ""]
+    };
 };
 
 // --- Other AI Services ---

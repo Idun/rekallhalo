@@ -169,7 +169,8 @@ export const ChapterEditor: React.FC<ChapterEditorProps> = ({
                         {/* Character Affinity Tracker */}
                         <div className="bg-white/50 rounded-lg p-2 border border-stone-200">
                             <label className="text-[9px] font-bold text-gray-400 uppercase mb-2 block">登场角色状态</label>
-                            <div className="space-y-2 max-h-[100px] overflow-y-auto pr-1 custom-scrollbar">
+                            {/* Scrollbar hidden with tailwind utilities */}
+                            <div className="space-y-2 max-h-[100px] overflow-y-auto pr-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
                                 {chapter.keyCharacters.length === 0 && <span className="text-[9px] text-gray-400 italic">暂无关键角色</span>}
                                 {chapter.keyCharacters.map(charName => {
                                     const charData = characters.find(c => c.name === charName);

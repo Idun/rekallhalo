@@ -27,10 +27,12 @@ interface SetupScreenProps {
     };
     setTempData?: (data: any) => void;
     playClickSound?: () => void;
+    handleAutoPlanBlueprint?: (config?: any) => void; // Updated signature
+    isGeneratingBlueprint?: boolean;
 }
 
 export const SetupScreen: React.FC<SetupScreenProps> = ({
-    context, setContext, bgImage, setGameState, handleStartGame, error, onSaveConfig, tempData, setTempData, playClickSound
+    context, setContext, bgImage, setGameState, handleStartGame, error, onSaveConfig, tempData, setTempData, playClickSound, handleAutoPlanBlueprint, isGeneratingBlueprint
 }) => {
     // 0: Protagonist, 1: World, 2: Supporting, 3: Narrative, 4: Plot Blueprint
     const [activePanel, setActivePanel] = useState(1);
@@ -309,6 +311,16 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
             <SmoothBackground src={bgImage} shouldBlur={false} brightness={1.0} />
             <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-black/60" />
 
+            {/* Error Notification Toast */}
+            {error && (
+                <div className="absolute top-24 left-1/2 transform -translate-x-1/2 z-[100] bg-red-600/90 text-white px-6 py-3 rounded-lg shadow-xl backdrop-blur animate-fade-in-up border border-red-400 flex items-center gap-2 max-w-sm text-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 shrink-0">
+                        <path fillRule="evenodd" d="M9.401 3.003c1.155-2 4.043-2 5.197 0l7.355 12.748c1.154 2-.29 4.5-2.599 4.5H4.645c-2.309 0-3.752-2.5-2.598-4.5L9.4 3.003zM12 8.25a.75.75 0 01.75.75v3.75a.75.75 0 01-1.5 0V9a.75.75 0 01.75-.75zm0 8.25a.75.75 0 100-1.5.75.75 0 000 1.5z" clipRule="evenodd" />
+                    </svg>
+                    <span className="text-sm font-bold">{error}</span>
+                </div>
+            )}
+
             {/* Header */}
             <div className="absolute top-0 left-0 w-full p-6 z-40 flex justify-between items-center bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
                 <div className="flex items-center gap-3 pointer-events-auto">
@@ -389,6 +401,8 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
                         setPlotModalViewMode(viewMode || 'list');
                         setShowPlotModal(true);
                     }}
+                    onAutoPlan={handleAutoPlanBlueprint}
+                    isGenerating={isGeneratingBlueprint}
                 />
 
             </div>
