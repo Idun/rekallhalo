@@ -24,10 +24,12 @@ interface LoadGameScreenProps {
     onBack: () => void;
     onImport: (save: SavedGame | SavedGame[]) => number;
     playClickSound: () => void;
+    onUndo?: () => void;
+    canUndo?: boolean;
 }
 
 export const LoadGameScreen: React.FC<LoadGameScreenProps> = ({ 
-    savedGames, onLoad, onDelete, onDeleteSession, onBack, onImport, playClickSound 
+    savedGames, onLoad, onDelete, onDeleteSession, onBack, onImport, playClickSound, onUndo, canUndo
 }) => {
     const [viewMode, setViewMode] = useState<'list' | 'canvas'>('list');
     const [focusedSessionId, setFocusedSessionId] = useState<string | null>(null);
@@ -195,6 +197,17 @@ export const LoadGameScreen: React.FC<LoadGameScreenProps> = ({
                  {viewMode === 'canvas' && (
                      <div className="flex-1 flex items-center gap-4 pointer-events-auto">
                          {focusedSessionId ? ( <div className="bg-white/80 backdrop-blur-md px-4 py-2 rounded-full shadow-md border border-amber-200 flex items-center gap-2 animate-fade-in-right"><span className="text-amber-600 text-xs font-bold">● 专注模式</span><button onClick={() => { playClickSound(); setFocusedSessionId(null); }} className="text-[10px] bg-amber-100 hover:bg-amber-200 text-amber-700 px-2 py-0.5 rounded transition-colors">显示全部宇宙</button></div> ) : ( <div className="bg-white/60 px-4 py-2 rounded-full border border-black/5 backdrop-blur-md text-xs font-mono text-gray-500 shadow-sm flex items-center gap-2"><span>上帝视角</span><span className="w-px h-3 bg-gray-300"></span><span className="text-gray-400">显示所有时间线</span></div> )}
+                         
+                         {/* Undo Button - Moved Here */}
+                         {canUndo && onUndo && (
+                            <button 
+                                onClick={() => { playClickSound(); onUndo(); }}
+                                className="bg-white/80 backdrop-blur-md px-4 py-2 rounded-full shadow-md border border-stone-200 flex items-center gap-2 text-xs font-bold text-stone-600 hover:bg-white hover:text-stone-800 transition-all active:scale-95 animate-fade-in-right"
+                            >
+                                <span className="text-sm">↶</span>
+                                <span>撤销删除</span>
+                            </button>
+                         )}
                      </div>
                  )}
                  <div className="bg-white/60 px-4 py-2 rounded-full border border-black/5 backdrop-blur-md text-xs font-mono text-gray-500 shadow-sm flex items-center gap-2 pointer-events-auto shrink-0 hidden md:flex">
@@ -226,6 +239,8 @@ export const LoadGameScreen: React.FC<LoadGameScreenProps> = ({
                     onLoad={onLoad}
                     onDelete={onDelete}
                     playClickSound={playClickSound}
+                    onUndo={onUndo}
+                    canUndo={canUndo}
                 />
             )}
             

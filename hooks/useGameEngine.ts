@@ -5,11 +5,11 @@ import {
     generateUUID, SaveType, ImageSize, ShotSize, SupportingCharacter, 
     Character, WorldSettings, ScheduledEvent, PlotChapter,
     ImageModel, AvatarStyle, InputMode, VisualEffectType, GalleryItem,
-    MemoryState
+    MemoryState, StorySegment
 } from '../types';
 import * as GeminiService from '../services/geminiService';
 import { StorageService } from '../services/storageService';
-import { getRandomBackground } from '../components/SmoothBackground';
+import { getRandomBackground, getSmartBackground } from '../components/SmoothBackground';
 import { CHARACTER_ARCHETYPES } from '../constants';
 
 const DEFAULT_MEMORY: MemoryState = {
@@ -35,14 +35,57 @@ const DEFAULT_CONTEXT: GameContext = {
     plotBlueprint: []
 };
 
-// Sound Effects
-const SOUNDS = {
-  click: new Audio('https://storage.googleapis.com/proud-boulder-354515/ai-fic-music/click.wav'),
-  hover: new Audio('https://storage.googleapis.com/proud-boulder-354515/ai-fic-music/hover.wav'),
-  progress: new Audio('https://storage.googleapis.com/proud-boulder-354515/ai-fic-music/progress.wav'),
-  confirm: new Audio('https://storage.googleapis.com/proud-boulder-354515/ai-fic-music/confirm.wav'),
+// --- Extended Audio Playlists (Reliable Sources) ---
+const EXTENDED_PLAYLISTS: Record<StoryMood, string[]> = {
+  [StoryMood.PEACEFUL]: [
+      "https://commondatastorage.googleapis.com/codeskulptor-demos/pyman_assets/intromusic.ogg",
+      "https://commondatastorage.googleapis.com/codeskulptor-assets/Epoq-Lepidoptera.ogg",
+      "https://commondatastorage.googleapis.com/codeskulptor-demos/pyman_assets/ateapill.ogg",
+      "https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3", // Relaxing
+      "https://cdn.pixabay.com/download/audio/2022/02/07/audio_84530b196d.mp3"  // Ambient
+  ],
+  [StoryMood.BATTLE]: [
+      "https://commondatastorage.googleapis.com/codeskulptor-demos/riceracer_assets/music/race1.ogg",
+      "https://commondatastorage.googleapis.com/codeskulptor-demos/riceracer_assets/music/race2.ogg",
+      "https://commondatastorage.googleapis.com/codeskulptor-demos/riceracer_assets/music/start.ogg",
+      "https://cdn.pixabay.com/download/audio/2022/03/09/audio_c8c8a73467.mp3", // Epic Battle
+      "https://cdn.pixabay.com/download/audio/2022/01/18/audio_d0a13f69d2.mp3"  // Action
+  ],
+  [StoryMood.TENSE]: [
+      "https://commondatastorage.googleapis.com/codeskulptor-assets/sounddogs/thrust.mp3",
+      "https://commondatastorage.googleapis.com/codeskulptor-assets/week7-brrring.m4a", 
+      "https://cdn.pixabay.com/download/audio/2022/10/25/audio_5145b23d57.mp3", // Suspense
+      "https://cdn.pixabay.com/download/audio/2021/11/25/audio_915835b674.mp3"  // Dark Drone
+  ],
+  [StoryMood.EMOTIONAL]: [
+      "https://commondatastorage.googleapis.com/codeskulptor-demos/pyman_assets/ateapill.ogg",
+      "https://cdn.pixabay.com/download/audio/2022/02/10/audio_fc8c83a779.mp3", // Sad Piano
+      "https://cdn.pixabay.com/download/audio/2022/03/24/audio_3335555d49.mp3"  // Emotional
+  ],
+  [StoryMood.MYSTERIOUS]: [
+      "https://commondatastorage.googleapis.com/codeskulptor-assets/Epoq-Lepidoptera.ogg",
+      "https://cdn.pixabay.com/download/audio/2022/04/27/audio_65b3234976.mp3", // Mystery
+      "https://cdn.pixabay.com/download/audio/2022/05/16/audio_db65d1b61c.mp3"  // Space
+  ],
+  [StoryMood.VICTORY]: [
+      "https://commondatastorage.googleapis.com/codeskulptor-demos/riceracer_assets/music/win.ogg",
+      "https://cdn.pixabay.com/download/audio/2022/01/26/audio_d14f631163.mp3", // Success
+      "https://cdn.pixabay.com/download/audio/2022/10/24/audio_55a29737b6.mp3"  // Uplifting
+  ]
 };
 
+// --- Embedded Base64 Sound Effects (Soft & Gentle Suite) ---
+// Retaining original SFX as requested
+const SFX_DATA = {
+    // Soft Tap (Low frequency, short decay) - For general UI clicks
+    click: "data:audio/wav;base64,UklGRjIAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YRAAAACAgICAAAAAgICAgIAAAACAAIA=",
+    // Very Soft Air/Bubble Pop - For Hover
+    hover: "data:audio/wav;base64,UklGRjoAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQ4AAACAgICAgICAAAAAgIA=",
+    // Gentle Chime - For progress/success
+    progress: "data:audio/wav;base64,UklGRi4AAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAEA//8AAP//AAAA//8AAAD//wAA",
+    // Soft Confirm
+    confirm: "data:audio/wav;base64,UklGRjIAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YRAAAACAgICAAAAAgICAgIAAAACAAIA="
+};
 
 export const useGameEngine = () => {
     // --- State: System ---
@@ -57,6 +100,7 @@ export const useGameEngine = () => {
     const [savedGames, setSavedGames] = useState<SavedGame[]>([]);
     const [currentLoadedSaveId, setCurrentLoadedSaveId] = useState<string | null>(null);
     const [setupTempData, setSetupTempData] = useState<any>(null); // For preserving setup form state
+    const [deletedSavesStack, setDeletedSavesStack] = useState<SavedGame[][]>([]); // Undo stack
 
     // --- State: Media & Visuals ---
     const [bgImage, setBgImage] = useState<string>('');
@@ -70,7 +114,7 @@ export const useGameEngine = () => {
 
     // --- State: Settings ---
     const [aiModel, setAiModel] = useState<string>('gemini-2.5-pro');
-    const [imageModel, setImageModel] = useState<ImageModel>('gemini-2.5-flash-image');
+    const [imageModel, setImageModel] = useState<ImageModel>('gemini-2.5-flash-image-preview');
     const [avatarStyle, setAvatarStyle] = useState<AvatarStyle>('anime');
     const [customAvatarStyle, setCustomAvatarStyle] = useState('');
     const [avatarRefImage, setAvatarRefImage] = useState('');
@@ -79,7 +123,7 @@ export const useGameEngine = () => {
     const [modelScopeApiKey, setModelScopeApiKey] = useState('');
     const [customPrompt, setCustomPrompt] = useState('');
     const [isMuted, setIsMuted] = useState(false);
-    const [volume, setVolume] = useState(0.5);
+    const [volume, setVolume] = useState(0.4); // Lower default volume
     const [showStoryPanelBackground, setShowStoryPanelBackground] = useState(true);
     const [historyFontSize, setHistoryFontSize] = useState(14);
     const [storyFontSize, setStoryFontSize] = useState(18);
@@ -92,6 +136,7 @@ export const useGameEngine = () => {
     const [isSummarizing, setIsSummarizing] = useState(false);
     const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(null);
     const [autoSaveState, setAutoSaveState] = useState<'saving' | 'complete' | null>(null);
+    const [lastAutoSaveId, setLastAutoSaveId] = useState<string | null>(null);
     
     // --- State: Image Gen Modal ---
     const [selectedImageStyle, setSelectedImageStyle] = useState<string>('anime');
@@ -99,20 +144,39 @@ export const useGameEngine = () => {
 
     // --- Refs ---
     const abortControllerRef = useRef<AbortController | null>(null);
-    const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
     
-    // --- Sound Effects ---
-    const playSound = useCallback((type: keyof typeof SOUNDS) => {
-        if (isMuted) return;
-        const originalSound = SOUNDS[type];
-        if(originalSound) {
-            // Clone node to allow overlapping sounds (important for rapid clicks/hovers)
-            const sound = originalSound.cloneNode() as HTMLAudioElement;
-            sound.volume = volume;
-            sound.play().catch(e => {
-                // Ignore autoplay errors or user interaction requirements
-                // console.warn('Sound play prevented:', e);
-            });
+    // Audio Refs
+    const bgmAudioRef = useRef<HTMLAudioElement | null>(null);
+    const currentTrackUrlRef = useRef<string | null>(null);
+    const latestContextRef = useRef(context);
+
+    // --- Sound Effects Logic ---
+    const soundsRef = useRef<Record<string, HTMLAudioElement>>({});
+
+    useEffect(() => {
+        soundsRef.current = {
+            click: new Audio(SFX_DATA.click),
+            hover: new Audio(SFX_DATA.hover),
+            progress: new Audio(SFX_DATA.progress),
+            confirm: new Audio(SFX_DATA.confirm),
+        };
+        // Pre-load and set gentle volume
+        Object.values(soundsRef.current).forEach(audio => {
+            audio.load();
+            // SFX volume relative to master, but generally softer
+            audio.volume = Math.min(volume * 0.8, 1); 
+        });
+    }, [volume]);
+
+    const playSound = useCallback((type: keyof typeof SFX_DATA) => {
+        if (isMuted || volume === 0) return;
+        
+        const sound = soundsRef.current[type];
+        if (sound) {
+            const clone = sound.cloneNode() as HTMLAudioElement;
+            clone.volume = Math.min(volume * 0.8, 1); 
+            clone.play().catch(() => {});
         }
     }, [isMuted, volume]);
 
@@ -121,29 +185,28 @@ export const useGameEngine = () => {
     const playProgressSound = useCallback(() => playSound('progress'), [playSound]);
     const playConfirmSound = useCallback(() => playSound('confirm'), [playSound]);
 
-
     // --- Initialization ---
     useEffect(() => {
         const init = async () => {
-            // Load settings from localStorage (Settings are small, fine for LS)
+            // Load settings from localStorage
             const loadedSettings = localStorage.getItem('protagonist_settings');
             if (loadedSettings) {
                 const s = JSON.parse(loadedSettings);
                 setAiModel(s.aiModel || 'gemini-2.5-pro');
-                setImageModel(s.imageModel || 'gemini-2.5-flash-image');
+                setImageModel(s.imageModel || 'gemini-2.5-flash-image-preview');
                 setAvatarStyle(s.avatarStyle || 'anime');
                 setBackgroundStyle(s.backgroundStyle || 'anime');
                 if (s.volume !== undefined) setVolume(s.volume);
                 if (s.isMuted !== undefined) setIsMuted(s.isMuted);
+                // Load other settings...
+                if (s.showStoryPanelBackground !== undefined) setShowStoryPanelBackground(s.showStoryPanelBackground);
+                if (s.autoSaveGallery !== undefined) setAutoSaveGallery(s.autoSaveGallery);
             }
 
-            // Perform Migration from LS to IDB if needed
             await StorageService.migrateFromLocalStorage();
 
-            // Load Saves and Gallery from IDB
             try {
                 const saves = await StorageService.getAllSaves();
-                // Sort by timestamp desc
                 saves.sort((a, b) => b.timestamp - a.timestamp);
                 setSavedGames(saves);
 
@@ -157,17 +220,95 @@ export const useGameEngine = () => {
         };
 
         init();
-
-        // Initial Background
         setBgImage(getRandomBackground(backgroundStyle));
     }, []);
 
     // Save Settings Effect
     useEffect(() => {
         localStorage.setItem('protagonist_settings', JSON.stringify({
-            aiModel, imageModel, avatarStyle, backgroundStyle, volume, isMuted
+            aiModel, imageModel, avatarStyle, backgroundStyle, volume, isMuted, showStoryPanelBackground, autoSaveGallery
         }));
-    }, [aiModel, imageModel, avatarStyle, backgroundStyle, volume, isMuted]);
+    }, [aiModel, imageModel, avatarStyle, backgroundStyle, volume, isMuted, showStoryPanelBackground, autoSaveGallery]);
+
+    // Update Latest Context Ref
+    useEffect(() => { latestContextRef.current = context; }, [context]);
+
+    // --- BGM Logic (Refactored) ---
+    const playRandomTrack = useCallback((mood: StoryMood) => {
+        if (!bgmAudioRef.current) return;
+        const playlist = EXTENDED_PLAYLISTS[mood] || EXTENDED_PLAYLISTS[StoryMood.PEACEFUL];
+        let availableTracks = playlist.filter(t => t !== currentTrackUrlRef.current);
+        
+        // If playlist only has 1 track or we filtered everything out, reset
+        if (availableTracks.length === 0) availableTracks = playlist;
+        
+        const randomTrack = availableTracks[Math.floor(Math.random() * availableTracks.length)];
+        currentTrackUrlRef.current = randomTrack;
+        
+        bgmAudioRef.current.src = randomTrack;
+        bgmAudioRef.current.play().catch(e => console.log("Audio play failed (interaction needed?):", e));
+    }, []);
+
+    useEffect(() => {
+        // Initialize Audio Object once
+        if (!bgmAudioRef.current) {
+            bgmAudioRef.current = new Audio();
+            bgmAudioRef.current.loop = false; // We handle looping manually via playlist
+            bgmAudioRef.current.preload = 'auto';
+            bgmAudioRef.current.crossOrigin = "anonymous";
+            
+            // Auto-play next track when ended
+            bgmAudioRef.current.addEventListener('ended', () => {
+                const currentMood = latestContextRef.current.currentSegment?.mood || StoryMood.PEACEFUL;
+                playRandomTrack(currentMood);
+            });
+            
+            // Handle loading errors by skipping track
+            bgmAudioRef.current.addEventListener('error', (e) => {
+                console.warn("Audio error, skipping track", e);
+                const currentMood = latestContextRef.current.currentSegment?.mood || StoryMood.PEACEFUL;
+                playRandomTrack(currentMood);
+            });
+        }
+        
+        const audio = bgmAudioRef.current;
+        // BGM volume is slightly lower than master volume to allow SFX to pop
+        audio.volume = isMuted ? 0 : volume * 0.6;
+
+        // Play music ONLY in PLAYING state (Game Main Interface)
+        if (gameState === GameState.PLAYING) {
+             const currentMood = context.currentSegment?.mood || StoryMood.PEACEFUL;
+             const playlist = EXTENDED_PLAYLISTS[currentMood] || EXTENDED_PLAYLISTS[StoryMood.PEACEFUL];
+             
+             // Check if current track is valid for current mood
+             const isCurrentTrackInMood = currentTrackUrlRef.current && playlist.includes(currentTrackUrlRef.current);
+             
+             // If track mismatch or stopped, play new
+             if (!isCurrentTrackInMood || audio.paused) {
+                 playRandomTrack(currentMood);
+             }
+        } else {
+            // Pause in ALL other screens (Landing, Setup, Loading, LoadGame)
+            audio.pause();
+            // Reset track ref so it refreshes when entering game next time
+            currentTrackUrlRef.current = null;
+        }
+        
+    }, [gameState, context.currentSegment?.id, isMuted, volume, playRandomTrack]); 
+    // ^ Key Fix: Added context.currentSegment?.id to dependency to ensure check runs on every new segment
+
+    // --- Mood-based Visual Effects Trigger ---
+    useEffect(() => {
+        if (gameState === GameState.PLAYING && context.currentSegment) {
+            const mood = context.currentSegment.mood;
+            if (mood === StoryMood.BATTLE) {
+                setBattleAnim('animate-shake');
+                setTimeout(() => setBattleAnim(null), 500);
+            } else if (mood === StoryMood.VICTORY) { 
+                // Could trigger confetti or similar if available
+            }
+        }
+    }, [context.currentSegment?.id]); // Trigger once per segment
 
     // --- Actions ---
 
@@ -176,6 +317,7 @@ export const useGameEngine = () => {
     };
 
     const handleStartNewGameSetup = () => {
+        playClickSound();
         setContext(DEFAULT_CONTEXT);
         setSetupTempData(null);
         setGameState(GameState.SETUP);
@@ -183,6 +325,7 @@ export const useGameEngine = () => {
     };
 
     const handleSaveSetup = () => {
+        playClickSound();
         const save: SavedGame = {
             id: generateUUID(),
             sessionId: generateUUID(),
@@ -195,11 +338,9 @@ export const useGameEngine = () => {
             type: SaveType.SETUP
         };
         
-        // Optimistic UI Update
         const newSaves = [save, ...savedGames];
         setSavedGames(newSaves);
         
-        // Persist
         StorageService.saveGame(save).catch(e => {
             console.error("Save setup failed", e);
             setError("保存失败: " + e.message);
@@ -223,23 +364,43 @@ export const useGameEngine = () => {
     };
 
     const deleteFromGallery = (id: string) => {
+        playClickSound();
         const newGallery = gallery.filter(i => i.id !== id);
         setGallery(newGallery);
         StorageService.deleteGalleryItem(id).catch(console.error);
     };
 
     const deleteSaveGame = (id: string) => {
-        const newSaves = savedGames.filter(s => s.id !== id);
-        setSavedGames(newSaves);
-        StorageService.deleteGame(id).catch(console.error);
+        playClickSound();
+        const saveToDelete = savedGames.find(s => s.id === id);
+        if (saveToDelete) {
+            setDeletedSavesStack(prev => [...prev, [saveToDelete]]); // Push to stack
+            const newSaves = savedGames.filter(s => s.id !== id);
+            setSavedGames(newSaves);
+            StorageService.deleteGame(id).catch(console.error);
+        }
     };
 
     const deleteSession = (sessionId: string) => {
+        playClickSound();
         const sessionSaves = savedGames.filter(s => s.sessionId === sessionId);
-        const idsToDelete = sessionSaves.map(s => s.id);
-        const newSaves = savedGames.filter(s => s.sessionId !== sessionId);
-        setSavedGames(newSaves);
-        StorageService.deleteGames(idsToDelete).catch(console.error);
+        if (sessionSaves.length > 0) {
+            setDeletedSavesStack(prev => [...prev, sessionSaves]); // Push all to stack
+            const idsToDelete = sessionSaves.map(s => s.id);
+            const newSaves = savedGames.filter(s => s.sessionId !== sessionId);
+            setSavedGames(newSaves);
+            StorageService.deleteGames(idsToDelete).catch(console.error);
+        }
+    };
+
+    const handleUndoDelete = () => {
+        if (deletedSavesStack.length === 0) return;
+        const lastDeletedGroup = deletedSavesStack[deletedSavesStack.length - 1];
+        setDeletedSavesStack(prev => prev.slice(0, -1));
+
+        setSavedGames(prev => [...prev, ...lastDeletedGroup]); // Optimistic update
+        StorageService.saveGames(lastDeletedGroup).catch(console.error); // Restore to DB
+        playClickSound(); // Reuse sound
     };
 
     const importSaveGame = (saves: SavedGame | SavedGame[]) => {
@@ -264,7 +425,7 @@ export const useGameEngine = () => {
     };
 
     const handleLoadGame = (save: SavedGame, forceSetup = false) => {
-        // Safe merge to prevent crashes on old saves missing new fields
+        playClickSound();
         const safeContext = {
             ...save.context,
             scheduledEvents: save.context.scheduledEvents || [],
@@ -308,39 +469,30 @@ export const useGameEngine = () => {
                 context.character,
                 context.worldSettings,
                 context.customGenre || '',
-                context.supportingCharacters, // Pass existing characters
-                context.plotBlueprint || [], // Pass existing chapters for context
-                config, // Pass the configuration
-                context.narrativeMode, // Pass Narrative Structure
-                context.narrativeTechnique // Pass Narrative Technique
+                context.supportingCharacters, 
+                context.plotBlueprint || [], 
+                config, 
+                context.narrativeMode, 
+                context.narrativeTechnique 
             );
             
-            // Map raw new characters to SupportingCharacter type
             const mappedNewChars: SupportingCharacter[] = newCharacters.map((nc: any) => {
-                // User requirement: Affinity -10 to 10 (same as SetupScreen default)
                 const randomAffinity = Math.floor(Math.random() * 21) - 10; 
-                
                 let archetype = nc.archetype;
                 let archetypeDesc = nc.archetypeDescription;
 
-                // Fix: Ensure archetype is valid Chinese or empty for Orgs
                 if (nc.category === 'other' || nc.gender === 'organization') {
                     archetype = undefined;
                     archetypeDesc = undefined;
                 } else {
-                    // Check if archetype matches known Chinese ones
                     const isValidArchetype = CHARACTER_ARCHETYPES.some(a => a.name === archetype);
-                    
                     if (!isValidArchetype) {
-                        // If invalid (e.g. English), assign a random valid one
                         const randomArchetypeObj = CHARACTER_ARCHETYPES[Math.floor(Math.random() * CHARACTER_ARCHETYPES.length)];
                         archetype = randomArchetypeObj.name;
-                        // Keep AI description if present, otherwise use default
                         if (!archetypeDesc) {
                             archetypeDesc = randomArchetypeObj.description;
                         }
                     } else if (!archetypeDesc) {
-                        // Valid name but missing description, fill it
                         const found = CHARACTER_ARCHETYPES.find(a => a.name === archetype);
                         if (found) archetypeDesc = found.description;
                     }
@@ -363,8 +515,7 @@ export const useGameEngine = () => {
 
             setContext(prev => ({
                 ...prev,
-                plotBlueprint: config && prev.plotBlueprint?.length > 0 ? [...prev.plotBlueprint, ...chapters] : chapters, // Append if continuing, replace if fresh
-                // Merge new characters with existing ones, avoiding duplicates by name
+                plotBlueprint: config && prev.plotBlueprint?.length > 0 ? [...prev.plotBlueprint, ...chapters] : chapters,
                 supportingCharacters: [
                     ...prev.supportingCharacters,
                     ...mappedNewChars.filter(nc => !prev.supportingCharacters.some(ec => ec.name === nc.name))
@@ -385,8 +536,10 @@ export const useGameEngine = () => {
         if (!context.character.name || !context.character.trait) { setError("请输入角色姓名和性格关键词"); return; }
         setError(null); setCurrentLoadedSaveId(null);
         abortControllerRef.current = new AbortController();
+        
+        // 1. Prepare initial state locally
+        const newSessionId = context.sessionId || generateUUID();
         const initialBlueprint = context.plotBlueprint ? context.plotBlueprint.map((c, i) => i === 0 ? { ...c, status: 'active' as const } : c) : [];
-        setContext(prev => ({ ...prev, sessionId: prev.sessionId || generateUUID(), scheduledEvents: prev.scheduledEvents || [], plotBlueprint: initialBlueprint }));
         
         setGameState(GameState.LOADING); 
         setLoadingProgress(0);
@@ -443,19 +596,55 @@ export const useGameEngine = () => {
                 if (autoSaveGallery) addToGallery(sceneBase64, opening.visualPrompt, avatarStyle);
             }
             
-            setContext(prev => ({ 
-                ...prev, 
-                sessionId: prev.sessionId || generateUUID(), 
-                storyName: opening.storyName || prev.storyName || "未命名故事", 
-                character: { ...prev.character, avatar: avatarBase64 }, 
+            // CONSTRUCT FINAL CONTEXT
+            const newContext: GameContext = { 
+                ...context, 
+                sessionId: newSessionId, 
+                storyName: opening.storyName || context.storyName || "未命名故事", 
+                character: { ...context.character, avatar: avatarBase64 }, 
                 supportingCharacters: updatedSupportingChars, 
                 history: [openingSegment], 
                 currentSegment: openingSegment, 
                 lastUpdated: Date.now(), 
-                memories: opening.newMemories || DEFAULT_MEMORY 
-            }));
+                memories: opening.newMemories || DEFAULT_MEMORY,
+                plotBlueprint: initialBlueprint, 
+                scheduledEvents: context.scheduledEvents || []
+            };
             
+            // CONSTRUCT SAVE OBJECT FOR INITIAL NODE
+            const saveObj: SavedGame = {
+                id: generateUUID(),
+                sessionId: newSessionId,
+                storyName: newContext.storyName,
+                storyId: openingSegment.id,
+                parentId: undefined, 
+                timestamp: Date.now(),
+                genre: newContext.genre,
+                characterName: newContext.character.name,
+                summary: openingSegment.text.substring(0, 50) + "...",
+                location: openingSegment.location,
+                context: newContext,
+                type: SaveType.AUTO,
+                choiceText: "开启旅程",
+                metaData: {
+                    turnCount: 1,
+                    totalSkillLevel: newContext.character.skills.reduce((acc, s) => acc + s.level, 0),
+                }
+            };
+            
+            // UPDATE STATES
+            setContext(newContext);
             setGameState(GameState.PLAYING); 
+            
+            // PERSIST SAVE
+            setSavedGames(prev => [saveObj, ...prev]);
+            StorageService.saveGame(saveObj).catch(console.error);
+
+            // TRIGGER NOTIFICATION
+            setAutoSaveState('saving');
+            setTimeout(() => setAutoSaveState('complete'), 1000);
+            setTimeout(() => setAutoSaveState(null), 3000);
+
             playProgressSound();
         } catch (err: any) { 
             if (err.message === "Aborted") return; 
@@ -466,6 +655,7 @@ export const useGameEngine = () => {
     };
 
     const handleChoice = async (choice: string, fromIndex?: number) => {
+        playConfirmSound();
         if (isLoading) return;
         
         let history = context.history;
@@ -511,56 +701,83 @@ export const useGameEngine = () => {
             
             const segmentWithChoice = { ...nextSegment, causedBy: choice };
 
-            setContext(prevContext => {
-                const newContext: GameContext = {
-                    ...prevContext,
-                    history: [...history, segmentWithChoice],
-                    currentSegment: segmentWithChoice,
-                    supportingCharacters: updatedSupportingChars,
-                    memories: nextSegment.newMemories || prevContext.memories,
-                    scheduledEvents: updatedEvents,
-                    lastUpdated: Date.now()
-                };
-        
-                // Auto-save logic
-                if (newContext.currentSegment) {
-                    const save: SavedGame = {
-                        id: generateUUID(),
-                        sessionId: newContext.sessionId,
-                        storyName: newContext.storyName,
-                        storyId: newContext.currentSegment.id,
-                        parentId: newContext.history.length > 1 ? newContext.history[newContext.history.length - 2].id : undefined,
-                        timestamp: Date.now(),
-                        genre: newContext.genre,
-                        characterName: newContext.character.name,
-                        summary: newContext.currentSegment.text.substring(0, 50) + "...",
-                        location: newContext.currentSegment.location,
-                        context: newContext,
-                        type: SaveType.AUTO,
-                        choiceText: newContext.currentSegment.causedBy,
-                        metaData: {
-                            turnCount: newContext.history.length,
-                            totalSkillLevel: newContext.character.skills.reduce((acc, s) => acc + s.level, 0),
-                        }
-                    };
-        
-                    setSavedGames(prevSaves => {
-                        const alreadySaved = prevSaves.some(s => s.storyId === save.storyId && s.sessionId === save.sessionId);
-                        if (alreadySaved) return prevSaves;
-                        
-                        StorageService.saveGame(save).catch(e => {
-                            console.error("Auto-save failed", e);
-                        });
-                        return [save, ...prevSaves];
-                    });
-                }
-                
-                return newContext;
-            });
+            // Visual/Sound Effects for Affinity (Kept logic but removed playBeep to preserve non-online audio)
+            const affinityUpdates = nextSegment.affinityChanges || {};
+            const hasMajorPositiveBond = Object.values(affinityUpdates).some(val => val >= 3);
+            const hasMajorNegativeBond = Object.values(affinityUpdates).some(val => val <= -3);
+            
+            if (hasMajorPositiveBond) { 
+                setVisualEffect('heal'); 
+                playProgressSound(); // Use existing sound
+            } else if (hasMajorNegativeBond) { 
+                setVisualEffect('darkness'); 
+                // No specific sound mapping for negative in standard set, skip sound
+            }
 
-            setAutoSaveState('saving');
-            setTimeout(() => setAutoSaveState('complete'), 1000);
-            setTimeout(() => setAutoSaveState(null), 3000);
+            // --- Updated State Management & Auto-Save Logic (Sequential Execution) ---
+            const newContext: GameContext = {
+                ...context, 
+                history: [...history, segmentWithChoice],
+                currentSegment: segmentWithChoice,
+                supportingCharacters: updatedSupportingChars,
+                memories: nextSegment.newMemories || context.memories,
+                scheduledEvents: updatedEvents,
+                lastUpdated: Date.now(),
+                // Safety fallback for sessionId
+                sessionId: context.sessionId || generateUUID() 
+            };
+
+            // 1. Prepare Save Object synchronously with the new context data
+            let saveObj: SavedGame | null = null;
+            if (newContext.currentSegment) {
+                saveObj = {
+                    id: generateUUID(),
+                    sessionId: newContext.sessionId,
+                    storyName: newContext.storyName,
+                    storyId: newContext.currentSegment.id,
+                    parentId: history.length > 0 ? history[history.length - 1].id : undefined,
+                    timestamp: Date.now(),
+                    genre: newContext.genre,
+                    characterName: newContext.character.name,
+                    summary: newContext.currentSegment.text.substring(0, 50) + "...",
+                    location: newContext.currentSegment.location,
+                    context: newContext,
+                    type: SaveType.AUTO,
+                    choiceText: choice,
+                    metaData: {
+                        turnCount: newContext.history.length,
+                        totalSkillLevel: newContext.character.skills.reduce((acc, s) => acc + s.level, 0),
+                    }
+                };
+            }
+
+            // 2. Update React State for Game Context
+            setContext(newContext);
+
+            // 3. Persist Save (DB & State)
+            if (saveObj) {
+                const finalSaveObj = saveObj; // Capture for closure
+                // Ensure state update happens
+                setSavedGames(prevSaves => {
+                    const alreadySaved = prevSaves.some(s => s.storyId === finalSaveObj.storyId && s.sessionId === finalSaveObj.sessionId);
+                    if (alreadySaved) return prevSaves;
+                    return [finalSaveObj, ...prevSaves];
+                });
+
+                setLastAutoSaveId(finalSaveObj.storyId || null);
+
+                // Persist to Storage asynchronously
+                StorageService.saveGame(finalSaveObj).catch(e => {
+                    console.error("Auto-save persisted failure", e);
+                });
+
+                // Trigger UI Notification
+                setAutoSaveState('saving');
+                setTimeout(() => setAutoSaveState('complete'), 1000);
+                setTimeout(() => setAutoSaveState(null), 3000);
+            }
+            
+            playProgressSound();
 
         } catch (e) {
             console.error(e);
@@ -571,16 +788,15 @@ export const useGameEngine = () => {
     };
 
     const handleManualSave = () => {
+        playClickSound();
         if (!context.currentSegment) return;
 
-        // NEW: Check for ANY existing save for this segment (Auto or Manual)
         const alreadySaved = savedGames.some(s => 
             s.sessionId === context.sessionId && 
             s.storyId === context.currentSegment?.id
         );
 
         if (alreadySaved) {
-            // Trigger "Warning" notification instead of "Success"
             toggleModal('saveExistingNotification', true);
             setTimeout(() => toggleModal('saveExistingNotification', false), 2000);
             return; 
@@ -618,11 +834,13 @@ export const useGameEngine = () => {
     };
 
     const handleBackToHome = () => {
+        playClickSound();
         setGameState(GameState.LANDING);
     };
 
     const handleGenerateImage = () => {
         if (!context.currentSegment) return;
+        playClickSound();
         setGeneratingImage(true);
         GeminiService.generateSceneImage(
             context.currentSegment.visualPrompt, 
@@ -664,17 +882,162 @@ export const useGameEngine = () => {
             }).catch(() => setGeneratingImage(false));
     };
 
+    // Placeholders for features handled by UI components but passed to GameScreen
     const handleUseSkill = (skill: any) => {};
-    const handleSummarizeMemory = () => {};
-    const handleRegenerate = (mode: 'full' | 'text' | 'choices') => {};
-    const handleSwitchVersion = (id: string, dir: 'prev' | 'next') => {};
-    const handleGlobalReplace = (find: string, replace: string) => 0;
-    const handleAddScheduledEvent = (e: any) => {};
-    const handleUpdateScheduledEvent = (e: any) => {};
-    const handleDeleteScheduledEvent = (id: string) => {};
-    const toggleCurrentBgFavorite = () => setIsCurrentBgFavorited(!isCurrentBgFavorited);
-    const handleTestModelScope = async (key: string) => GeminiService.validateModelScopeConnection(key);
-    const handleUpgradeSkill = (id: string) => {};
+    const handleSummarizeMemory = async () => {
+        playClickSound();
+        if (context.history.length < 2) return;
+        setIsSummarizing(true);
+        try {
+            const summary = await GeminiService.summarizeHistory(context.history, aiModel);
+            setContext(prev => ({ ...prev, memories: { ...prev.memories, storyMemory: summary } }));
+            playProgressSound();
+        } catch(e) { console.error("Summarize failed", e); } finally { setIsSummarizing(false); }
+    };
+    
+    const handleRegenerate = async (mode: 'full' | 'text' | 'choices') => {
+        playClickSound();
+        const lastIdx = context.history.length - 1;
+        if (lastIdx < 0) return;
+        const lastSegment = context.history[lastIdx];
+        
+        if (mode !== 'choices' && lastIdx > 0 && !lastSegment.causedBy) { setError("无法重新生成此节点"); return; }
+        
+        setIsLoading(true);
+        setError(null);
+        
+        try {
+            let newSegment: StorySegment;
+            if (mode === 'choices') {
+                const historyContext = context.history; 
+                newSegment = await GeminiService.advanceStory(
+                    historyContext, "", context.genre, context.character, context.supportingCharacters, context.worldSettings, context.memories, aiModel, context.customGenre, customPrompt, context.scheduledEvents || [], context.narrativeMode, context.narrativeTechnique, context.plotBlueprint, 'choices'
+                );
+                setContext(prev => {
+                    const history = [...prev.history];
+                    history[lastIdx] = { ...history[lastIdx], choices: newSegment.choices };
+                    return { ...prev, history, currentSegment: history[lastIdx], lastUpdated: Date.now() };
+                });
+            } else {
+                const historyContext = context.history.slice(0, lastIdx);
+                const causedBy = lastSegment.causedBy || "";
+                newSegment = await GeminiService.advanceStory(
+                    historyContext, causedBy, context.genre, context.character, context.supportingCharacters, context.worldSettings, context.memories, aiModel, context.customGenre, customPrompt, context.scheduledEvents || [], context.narrativeMode, context.narrativeTechnique, context.plotBlueprint, mode
+                );
+                newSegment.causedBy = causedBy;
+                
+                setContext(prev => {
+                    const history = [...prev.history];
+                    const currentSeg = { ...history[lastIdx] };
+                    if (!currentSeg.versions) { currentSeg.versions = [{ text: currentSeg.text, choices: currentSeg.choices, visualPrompt: currentSeg.visualPrompt, mood: currentSeg.mood }]; currentSeg.currentVersionIndex = 0; }
+                    const newVersion = { text: newSegment.text, choices: newSegment.choices, visualPrompt: newSegment.visualPrompt, mood: newSegment.mood, location: newSegment.location };
+                    currentSeg.versions.push(newVersion);
+                    const newIdx = currentSeg.versions.length - 1;
+                    currentSeg.currentVersionIndex = newIdx;
+                    // Update fields
+                    currentSeg.text = newVersion.text; currentSeg.choices = newVersion.choices; currentSeg.visualPrompt = newVersion.visualPrompt; currentSeg.mood = newVersion.mood; currentSeg.location = newVersion.location;
+                    history[lastIdx] = currentSeg;
+                    return { ...prev, history, currentSegment: currentSeg, memories: newSegment.newMemories || prev.memories, lastUpdated: Date.now() };
+                });
+            }
+            playProgressSound();
+        } catch (e) { console.error("Regenerate failed", e); setError("重新生成失败"); } finally { setIsLoading(false); }
+    };
+
+    const handleSwitchVersion = (segmentId: string, direction: 'prev' | 'next') => {
+        playClickSound();
+        setContext(prev => {
+            const history = [...prev.history];
+            const idx = history.findIndex(h => h.id === segmentId);
+            if (idx === -1) return prev;
+            const seg = { ...history[idx] };
+            if (!seg.versions || seg.versions.length < 2) return prev;
+            let newIdx = (seg.currentVersionIndex || 0) + (direction === 'next' ? 1 : -1);
+            if (newIdx < 0) newIdx = seg.versions.length - 1;
+            if (newIdx >= seg.versions.length) newIdx = 0;
+            if (newIdx === seg.currentVersionIndex) return prev;
+            const v = seg.versions[newIdx];
+            seg.currentVersionIndex = newIdx;
+            seg.text = v.text; seg.choices = v.choices; seg.visualPrompt = v.visualPrompt; seg.mood = v.mood; seg.location = v.location;
+            history[idx] = seg;
+            const isCurrent = prev.currentSegment?.id === segmentId;
+            return { ...prev, history, currentSegment: isCurrent ? seg : prev.currentSegment, lastUpdated: Date.now() };
+        });
+    };
+
+    const handleGlobalReplace = (findText: string, replaceText: string): number => {
+        if (!findText || !replaceText) return 0;
+        const escapeRegExp = (string: string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(escapeRegExp(findText), 'g');
+        let count = 0;
+        const countIn = (s: string | undefined) => s ? (s.match(regex) || []).length : 0;
+        
+        // Check memories
+        Object.values(context.memories).forEach(val => { if (typeof val === 'string') count += countIn(val); });
+        
+        // Check history (last 5)
+        const limit = 5;
+        const startIndex = Math.max(0, context.history.length - limit);
+        for (let i = startIndex; i < context.history.length; i++) {
+            const seg = context.history[i];
+            count += countIn(seg.text);
+            seg.choices.forEach(c => count += countIn(c));
+        }
+        
+        if (count === 0) return 0;
+        
+        setContext(prev => {
+            const newMemories = { ...prev.memories };
+            (Object.keys(newMemories) as (keyof MemoryState)[]).forEach(k => { if (typeof newMemories[k] === 'string') newMemories[k] = newMemories[k].replace(regex, replaceText); });
+            const newHistory = [...prev.history];
+            const start = Math.max(0, newHistory.length - limit);
+            for (let i = start; i < newHistory.length; i++) {
+                let updatedText = newHistory[i].text.replace(regex, replaceText);
+                let updatedChoices = newHistory[i].choices.map(c => c.replace(regex, replaceText));
+                newHistory[i] = { ...newHistory[i], text: updatedText, choices: updatedChoices };
+            }
+            let newCurrent = prev.currentSegment ? { ...prev.currentSegment } : null;
+            if (newCurrent) {
+                newCurrent.text = newCurrent.text.replace(regex, replaceText);
+                newCurrent.choices = newCurrent.choices.map(c => c.replace(regex, replaceText));
+            }
+            return { ...prev, memories: newMemories, history: newHistory, currentSegment: newCurrent, lastUpdated: Date.now() };
+        });
+        return count;
+    };
+
+    const handleAddScheduledEvent = (event: Omit<ScheduledEvent, 'id' | 'createdTurn' | 'status'>) => {
+        const newEvent: ScheduledEvent = { ...event, id: generateUUID(), createdTurn: context.history.length, status: 'pending' };
+        setContext(prev => ({ ...prev, scheduledEvents: [...(prev.scheduledEvents || []), newEvent] }));
+        playConfirmSound();
+    };
+
+    const handleUpdateScheduledEvent = (updatedEvent: ScheduledEvent) => {
+        setContext(prev => ({ ...prev, scheduledEvents: (prev.scheduledEvents || []).map(e => e.id === updatedEvent.id ? updatedEvent : e) }));
+        playConfirmSound();
+    };
+
+    const handleDeleteScheduledEvent = (id: string) => {
+        setContext(prev => ({ ...prev, scheduledEvents: (prev.scheduledEvents || []).filter(e => e.id !== id) }));
+        playClickSound();
+    };
+
+    const toggleCurrentBgFavorite = () => {
+        playClickSound();
+        if (isCurrentBgFavorited) {
+            const item = gallery.find(i => i.base64 === bgImage);
+            if (item) deleteFromGallery(item.id);
+        } else {
+            const prompt = context.currentSegment?.visualPrompt || context.currentSegment?.text || "Saved Moment";
+            addToGallery(bgImage, prompt, backgroundStyle);
+        }
+        setIsCurrentBgFavorited(!isCurrentBgFavorited);
+    };
+
+    const handleUpgradeSkill = (skillId: string) => {
+        setContext(prev => ({ ...prev, character: { ...prev.character, skills: prev.character.skills.map(s => s.id === skillId ? { ...s, level: (s.level || 1) + 1 } : s ) } }));
+        playProgressSound();
+    };
 
     // Settings Setters
     const handleSetAiModel = (m: string) => setAiModel(m);
@@ -691,6 +1054,7 @@ export const useGameEngine = () => {
     const handleSetStoryFontSize = (n: number) => setStoryFontSize(n);
     const handleSetStoryFontFamily = (s: string) => setStoryFontFamily(s);
     const handleSetAutoSaveGallery = (b: boolean) => setAutoSaveGallery(b);
+    const handleTestModelScope = async (key: string) => GeminiService.validateModelScopeConnection(key);
 
     return {
         gameState, setGameState,
@@ -698,7 +1062,7 @@ export const useGameEngine = () => {
         bgImage, setBgImage,
         isLoading, loadingProgress, error,
         modals, toggleModal,
-        savedGames, handleLoadGame, deleteSaveGame, deleteSession, importSaveGame,
+        savedGames, handleLoadGame, deleteSaveGame, deleteSession, importSaveGame, handleUndoDelete, deletedSavesStack,
         gallery, viewingImage, setViewingImage, deleteFromGallery,
         aiModel, handleSetAiModel,
         imageModel, handleSetImageModel,

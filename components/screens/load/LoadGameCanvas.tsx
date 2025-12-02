@@ -10,6 +10,8 @@ interface LoadGameCanvasProps {
     onLoad: (save: SavedGame, forceSetup?: boolean) => void;
     onDelete: (id: string, e?: React.MouseEvent) => void;
     playClickSound: () => void;
+    onUndo?: () => void;
+    canUndo?: boolean;
 }
 
 interface Coords {
@@ -69,7 +71,7 @@ const isSaveTextNode = (save: SavedGame): boolean => {
 };
 
 export const LoadGameCanvas: React.FC<LoadGameCanvasProps> = ({ 
-    savedGames, focusedSessionId, onLoad, onDelete, playClickSound 
+    savedGames, focusedSessionId, onLoad, onDelete, playClickSound, onUndo, canUndo
 }) => {
     const [pan, setPan] = useState<Coords>({ x: 100, y: 100 });
     const [scale, setScale] = useState(0.8);
@@ -101,7 +103,13 @@ export const LoadGameCanvas: React.FC<LoadGameCanvasProps> = ({
 
     // Keyboard Listeners
     useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => { if (e.key === 'Control' || e.key === 'Meta') setIsCtrlDown(true); };
+        const handleKeyDown = (e: KeyboardEvent) => { 
+            if (e.key === 'Control' || e.key === 'Meta') setIsCtrlDown(true); 
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+                e.preventDefault();
+                if (onUndo) onUndo();
+            }
+        };
         const handleKeyUp = (e: KeyboardEvent) => { if (e.key === 'Control' || e.key === 'Meta') setIsCtrlDown(false); };
         const handleBlur = () => setIsCtrlDown(false);
         window.addEventListener('keydown', handleKeyDown);
@@ -112,7 +120,7 @@ export const LoadGameCanvas: React.FC<LoadGameCanvasProps> = ({
             window.removeEventListener('keyup', handleKeyUp);
             window.removeEventListener('blur', handleBlur);
         };
-    }, []);
+    }, [onUndo]);
 
     // Initial View Position
     useEffect(() => {

@@ -306,54 +306,9 @@ export const GameScreen: React.FC<GameScreenProps> = (props) => {
     const [inputPage, setInputPage] = useState<0 | 1>(0);
     const chatEndRef = useRef<HTMLDivElement>(null);
     const sideToolsRef = useRef<HTMLDivElement>(null);
-    const audioRef = useRef<HTMLAudioElement>(null);
 
-    // BGM Mapping
-    const musicMap: Record<StoryMood, string> = {
-        [StoryMood.PEACEFUL]: 'https://storage.googleapis.com/proud-boulder-354515/ai-fic-music/peaceful.mp3',
-        [StoryMood.BATTLE]: 'https://storage.googleapis.com/proud-boulder-354515/ai-fic-music/battle.mp3',
-        [StoryMood.TENSE]: 'https://storage.googleapis.com/proud-boulder-354515/ai-fic-music/tense.mp3',
-        [StoryMood.EMOTIONAL]: 'https://storage.googleapis.com/proud-boulder-354515/ai-fic-music/emotional.mp3',
-        [StoryMood.MYSTERIOUS]: 'https://storage.googleapis.com/proud-boulder-354515/ai-fic-music/mysterious.mp3',
-        [StoryMood.VICTORY]: 'https://storage.googleapis.com/proud-boulder-354515/ai-fic-music/victory.mp3',
-    };
-
-    // BGM Effect - Refined
-    const activeMoodRef = useRef<StoryMood | null>(null);
-
-    useEffect(() => {
-        const audio = audioRef.current;
-        if (!audio) return;
-
-        // Apply volume/mute state
-        audio.volume = volume;
-        audio.muted = isMuted;
-
-        const targetMood = context.currentSegment?.mood || StoryMood.PEACEFUL;
-        const targetSrc = musicMap[targetMood];
-
-        // Only switch tracks if mood changes (avoid string comparison issues on src property)
-        if (activeMoodRef.current !== targetMood) {
-            if (targetSrc) {
-                audio.src = targetSrc;
-                audio.load();
-                const playPromise = audio.play();
-                if (playPromise !== undefined) {
-                    playPromise.catch(e => {
-                        // Silent catch for autoplay blocks, will be handled by user interaction later
-                        // console.warn("BGM Autoplay prevented:", e);
-                    });
-                }
-                activeMoodRef.current = targetMood;
-            }
-        } else {
-            // Ensure playback is active if it should be
-            if (audio.paused && !isMuted && volume > 0) {
-                audio.play().catch(() => {});
-            }
-        }
-    }, [context.currentSegment?.mood, volume, isMuted]);
-
+    // BGM Logic is handled in hook/useGameEngine, GameScreen is purely visual for audio (except specific toggles)
+    
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.key === 'Tab') { e.preventDefault(); setIsUiVisible(prev => !prev); }
@@ -494,11 +449,11 @@ export const GameScreen: React.FC<GameScreenProps> = (props) => {
     const Tooltip = ({ text }: { text: string }) => ( <div className="absolute right-full top-1/2 -translate-y-1/2 mr-3 px-2 py-1 bg-stone-800 text-stone-100 text-xs font-bold rounded shadow-lg whitespace-nowrap opacity-0 group-hover/tool:opacity-100 transition-opacity pointer-events-none z-[100] border border-stone-600"> {text} <div className="absolute top-1/2 right-[-4px] -translate-y-1/2 border-y-4 border-y-transparent border-l-4 border-l-stone-600"></div> </div> );
 
     const sideToolsContent = (
-        <div ref={sideToolsRef} className="flex flex-col gap-3 pointer-events-auto items-end">
+        <div ref={sideToolsRef} className="flex flex-col gap-2 pointer-events-auto items-end">
             <div className="relative group/tool flex items-center">
                 {!showGodMode && !showMemory && !showInventory && !showScheduler && !showRegenMenu && <Tooltip text="剧情回顾：查看完整故事历史" />}
-                <button onClick={(e) => { e.stopPropagation(); playClickSound(); onOpenHistoryModal(); setShowGodMode(false); setShowMemory(false); setShowInventory(false); setShowScheduler(false); setShowRegenMenu(false); }} className={`shadow-lg transition-all duration-300 rounded-full w-12 h-12 flex items-center justify-center border-2 bg-stone-800 border-stone-600 text-stone-200 hover:scale-110`} title="剧情回顾">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" /></svg>
+                <button onClick={(e) => { e.stopPropagation(); playClickSound(); onOpenHistoryModal(); setShowGodMode(false); setShowMemory(false); setShowInventory(false); setShowScheduler(false); setShowRegenMenu(false); }} className={`shadow-lg transition-all duration-300 rounded-full w-9 h-9 flex items-center justify-center border-2 bg-stone-800 border-stone-600 text-stone-200 hover:scale-110`} title="剧情回顾">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" /></svg>
                 </button>
             </div>
             
@@ -516,11 +471,11 @@ export const GameScreen: React.FC<GameScreenProps> = (props) => {
                         setShowScheduler(false); 
                         setShowRegenMenu(false); 
                     }} 
-                    className={`shadow-lg transition-all duration-300 rounded-full w-12 h-12 flex items-center justify-center border-2 ${showBlueprintModal ? 'bg-stone-100 border-stone-300 text-stone-600' : 'bg-stone-800 border-stone-600 text-stone-200 hover:scale-110'}`} 
+                    className={`shadow-lg transition-all duration-300 rounded-full w-9 h-9 flex items-center justify-center border-2 ${showBlueprintModal ? 'bg-stone-100 border-stone-300 text-stone-600' : 'bg-stone-800 border-stone-600 text-stone-200 hover:scale-110'}`} 
                     title="剧情蓝图"
                 >
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0z" />
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0z" />
                     </svg>
                 </button>
             </div>
@@ -545,7 +500,7 @@ export const GameScreen: React.FC<GameScreenProps> = (props) => {
                         </div>
                     </div>
                 </div>
-                <button onClick={(e) => { e.stopPropagation(); playClickSound(); setShowScheduler(!showScheduler); setShowGodMode(false); setShowMemory(false); setShowInventory(false); setShowRegenMenu(false); setShowBlueprintModal(false); }} className={`shadow-lg transition-all duration-300 rounded-full w-12 h-12 flex items-center justify-center border-2 ${showScheduler ? 'bg-stone-100 border-stone-300 text-stone-600' : 'bg-stone-800 border-stone-600 text-stone-200 hover:scale-110'}`} title="预设事件"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5m-9-6h.008v.008H12v-.008zM12 15h.008v.008H12V15zm0 2.25h.008v.008H12v-.008zM9.75 15h.008v.008H9.75V15zm0 2.25h.008v.008H9.75v-.008zM7.5 15h.008v.008H7.5V15zm0 2.25h.008v.008H7.5v-.008zm6.75-4.5h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V15zm0 2.25h.008v.008h-.008v-.008zm2.25-4.5h.008v.008H16.5v-.008zm0 2.25h.008v.008H16.5V15z" /></svg></button>
+                <button onClick={(e) => { e.stopPropagation(); playClickSound(); setShowScheduler(!showScheduler); setShowGodMode(false); setShowMemory(false); setShowInventory(false); setShowRegenMenu(false); setShowBlueprintModal(false); }} className={`shadow-lg transition-all duration-300 rounded-full w-9 h-9 flex items-center justify-center border-2 ${showScheduler ? 'bg-stone-100 border-stone-300 text-stone-600' : 'bg-stone-800 border-stone-600 text-stone-200 hover:scale-110'}`} title="预设事件"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5m-9-6h.008v.008H12v-.008zM12 15h.008v.008H12V15zm0 2.25h.008v.008H12v-.008zM9.75 15h.008v.008H9.75V15zm0 2.25h.008v.008H9.75v-.008zM7.5 15h.008v.008H7.5V15zm0 2.25h.008v.008H7.5v-.008zm6.75-4.5h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V15zm0 2.25h.008v.008h-.008v-.008zm2.25-4.5h.008v.008H16.5v-.008zm0 2.25h.008v.008H16.5V15z" /></svg></button>
             </div>
 
             {/* God Mode */}
@@ -560,8 +515,8 @@ export const GameScreen: React.FC<GameScreenProps> = (props) => {
                             <button onClick={handleGodModeReplace} disabled={!findText.trim() || !replaceText.trim()} className="w-full bg-stone-800 hover:bg-stone-700 text-stone-100 text-xs font-bold py-2 rounded shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors">执行修正</button>
                         </div>
                 </div>
-                <button onClick={(e) => { e.stopPropagation(); playClickSound(); setShowGodMode(!showGodMode); setShowMemory(false); setShowInventory(false); setShowScheduler(false); setShowRegenMenu(false); setShowBlueprintModal(false); }} className={`shadow-lg transition-all duration-300 rounded-full w-12 h-12 flex items-center justify-center border-2 ${showGodMode ? 'bg-stone-100 border-stone-300 text-stone-600' : 'bg-stone-800 border-stone-600 text-stone-200 hover:scale-110'}`} title="全局查找替换">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6"><path d="M21.731 2.269a2.625 2.625 0 00-3.712 0l-1.157 1.157 3.712 3.712 1.157-1.157a2.625 2.625 0 000-3.712zM19.513 8.199l-3.712-3.712-12.15 12.15a5.25 5.25 0 00-1.32 2.214l-.8 2.685a.75.75 0 00.933.933l2.685-.8a5.25 5.25 0 002.214-1.32L19.513 8.2z" /></svg>
+                <button onClick={(e) => { e.stopPropagation(); playClickSound(); setShowGodMode(!showGodMode); setShowMemory(false); setShowInventory(false); setShowScheduler(false); setShowRegenMenu(false); setShowBlueprintModal(false); }} className={`shadow-lg transition-all duration-300 rounded-full w-9 h-9 flex items-center justify-center border-2 ${showGodMode ? 'bg-stone-100 border-stone-300 text-stone-600' : 'bg-stone-800 border-stone-600 text-stone-200 hover:scale-110'}`} title="全局查找替换">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path d="M21.731 2.269a2.625 2.625 0 00-3.712 0l-1.157 1.157 3.712 3.712 1.157-1.157a2.625 2.625 0 000-3.712zM19.513 8.199l-3.712-3.712-12.15 12.15a5.25 5.25 0 00-1.32 2.214l-.8 2.685a.75.75 0 00.933.933l2.685-.8a5.25 5.25 0 002.214-1.32L19.513 8.2z" /></svg>
                 </button>
             </div>
 
@@ -583,8 +538,8 @@ export const GameScreen: React.FC<GameScreenProps> = (props) => {
                         </div>
                     </div>
                 </div>
-                <button onClick={(e) => { e.stopPropagation(); playClickSound(); setShowMemory(!showMemory); setShowGodMode(false); setShowInventory(false); setShowScheduler(false); setShowRegenMenu(false); setShowBlueprintModal(false); }} className={`shadow-lg transition-all duration-300 rounded-full w-12 h-12 flex items-center justify-center border-2 ${showMemory ? 'bg-stone-100 border-stone-300 text-stone-600' : 'bg-stone-800 border-stone-600 text-stone-200 hover:scale-110'}`} title="记忆区">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6"><path d="M11.25 4.533A9.707 9.707 0 006 3a9.735 9.735 0 00-3.25.555.75.75 0 00-.5.707v14.25a.75.75 0 001 .707A8.237 8.237 0 016 18.75c1.995 0 3.823.707 5.25 1.886V4.533zM12.75 20.636A8.214 8.214 0 0118 18.75c.966 0 1.89.166 2.75.47a.75.75 0 001-.708V4.262a.75.75 0 00-.5-.707A9.735 9.735 0 0018 3a9.707 9.707 0 00-5.25 1.533v16.103z" /></svg>
+                <button onClick={(e) => { e.stopPropagation(); playClickSound(); setShowMemory(!showMemory); setShowGodMode(false); setShowInventory(false); setShowScheduler(false); setShowRegenMenu(false); setShowBlueprintModal(false); }} className={`shadow-lg transition-all duration-300 rounded-full w-9 h-9 flex items-center justify-center border-2 ${showMemory ? 'bg-stone-100 border-stone-300 text-stone-600' : 'bg-stone-800 border-stone-600 text-stone-200 hover:scale-110'}`} title="记忆区">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path d="M11.25 4.533A9.707 9.707 0 006 3a9.735 9.735 0 00-3.25.555.75.75 0 00-.5.707v14.25a.75.75 0 001 .707A8.237 8.237 0 016 18.75c1.995 0 3.823.707 5.25 1.886V4.533zM12.75 20.636A8.214 8.214 0 0118 18.75c.966 0 1.89.166 2.75.47a.75.75 0 001-.708V4.262a.75.75 0 00-.5-.707A9.735 9.735 0 0018 3a9.707 9.707 0 00-5.25 1.533v16.103z" /></svg>
                 </button>
             </div>
 
@@ -603,8 +558,8 @@ export const GameScreen: React.FC<GameScreenProps> = (props) => {
                     </div>
                 </div>
             </div>
-            <button onClick={(e) => { e.stopPropagation(); playClickSound(); setShowInventory(!showInventory); setShowMemory(false); setShowGodMode(false); setShowScheduler(false); setShowRegenMenu(false); setShowBlueprintModal(false); }} className={`shadow-lg transition-all duration-300 rounded-full w-12 h-12 flex items-center justify-center border-2 ${showInventory ? 'bg-stone-100 border-stone-300 text-stone-600' : 'bg-stone-800 border-stone-600 text-stone-200 hover:scale-110'}`} title="背包 / 物品">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6"><path fillRule="evenodd" d="M7.5 6v.75H5.513c-.96 0-1.764.724-1.865 1.679l-1.263 12A1.875 1.875 0 004.25 22.5h15.5a1.875 1.875 0 001.865-2.071l-1.263-12a1.875 1.875 0 00-1.865-1.679H16.5V6a4.5 4.5 0 10-9 0zM12 3a3 3 0 00-3 3v.75h6V6a3 3 0 00-3-3zm-3 8.25a3 3 0 106 0v-.75a.75.75 0 011.5 0v.75a4.5 4.5 0 11-9 0v-.75a.75.75 0 011.5 0v.75z" clipRule="evenodd" /></svg>
+            <button onClick={(e) => { e.stopPropagation(); playClickSound(); setShowInventory(!showInventory); setShowMemory(false); setShowGodMode(false); setShowScheduler(false); setShowRegenMenu(false); setShowBlueprintModal(false); }} className={`shadow-lg transition-all duration-300 rounded-full w-9 h-9 flex items-center justify-center border-2 ${showInventory ? 'bg-stone-100 border-stone-300 text-stone-600' : 'bg-stone-800 border-stone-600 text-stone-200 hover:scale-110'}`} title="背包 / 物品">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path fillRule="evenodd" d="M7.5 6v.75H5.513c-.96 0-1.764.724-1.865 1.679l-1.263 12A1.875 1.875 0 004.25 22.5h15.5a1.875 1.875 0 001.865-2.071l-1.263-12a1.875 1.875 0 00-1.865-1.679H16.5V6a4.5 4.5 0 10-9 0zM12 3a3 3 0 00-3 3v.75h6V6a3 3 0 00-3-3zm-3 8.25a3 3 0 106 0v-.75a.75.75 0 011.5 0v.75a4.5 4.5 0 11-9 0v-.75a.75.75 0 011.5 0v.75z" clipRule="evenodd" /></svg>
             </button>
         </div>
 
@@ -621,7 +576,7 @@ export const GameScreen: React.FC<GameScreenProps> = (props) => {
                      <button onClick={() => { handleRegenerate('choices'); setShowRegenMenu(false); }} className="w-full text-center px-3 py-2.5 rounded text-stone-700 hover:bg-emerald-50 hover:text-emerald-700 transition-colors text-xs font-bold border border-transparent hover:border-emerald-200 group/btn">仅刷新选项</button>
                 </div>
             </div>
-            <button onClick={(e) => { e.stopPropagation(); playClickSound(); setShowRegenMenu(!showRegenMenu); setShowMemory(false); setShowInventory(false); setShowGodMode(false); setShowScheduler(false); setShowBlueprintModal(false); }} className={`shadow-lg transition-all duration-300 rounded-full w-12 h-12 flex items-center justify-center border-2 ${showRegenMenu ? 'bg-stone-100 border-stone-300 text-stone-600' : 'bg-stone-800 border-stone-600 text-stone-200 hover:scale-110'}`} title="时光回溯">
+            <button onClick={(e) => { e.stopPropagation(); playClickSound(); setShowRegenMenu(!showRegenMenu); setShowMemory(false); setShowInventory(false); setShowGodMode(false); setShowScheduler(false); setShowBlueprintModal(false); }} className={`shadow-lg transition-all duration-300 rounded-full w-9 h-9 flex items-center justify-center border-2 ${showRegenMenu ? 'bg-stone-100 border-stone-300 text-stone-600' : 'bg-stone-800 border-stone-600 text-stone-200 hover:scale-110'}`} title="时光回溯">
                 <span className={`text-xl font-bold ${showRegenMenu ? 'rotate-180' : ''} transition-transform duration-500`}>↻</span>
             </button>
         </div>
@@ -741,7 +696,7 @@ export const GameScreen: React.FC<GameScreenProps> = (props) => {
             setContext={setContext}
             initialViewMode="graph"
         />
-        <audio ref={audioRef} loop autoPlay />
+        {/* Removed redundant audio element */}
 
         <div className={`absolute inset-0 z-10 cursor-pointer transition-opacity ${isUiVisible ? 'block' : 'hidden'}`} onClick={() => setIsUiVisible(false)} title="点击隐藏界面 (沉浸模式)" />
         {generatingImage && ( <div className="absolute top-20 right-4 z-20 bg-black/40 backdrop-blur px-3 py-1 rounded-full flex items-center gap-2 border border-white/10 animate-pulse"> <span className="w-2 h-2 bg-purple-400 rounded-full"></span> <span className="text-[10px] text-white/80">具象化重构中...</span> </div> )}

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { GameState, GameContext, StoryGenre, StoryMood, generateUUID, SupportingCharacter } from '../../types';
 import { SmoothBackground } from '../SmoothBackground';
@@ -26,12 +27,13 @@ interface SetupScreenProps {
     };
     setTempData?: (data: any) => void;
     playClickSound?: () => void;
+    playHoverSound?: () => void;
     handleAutoPlanBlueprint?: (config?: any) => void; // Updated signature
     isGeneratingBlueprint?: boolean;
 }
 
 export const SetupScreen: React.FC<SetupScreenProps> = ({
-    context, setContext, bgImage, setGameState, handleStartGame, error, onSaveConfig, tempData, setTempData, playClickSound, handleAutoPlanBlueprint, isGeneratingBlueprint
+    context, setContext, bgImage, setGameState, handleStartGame, error, onSaveConfig, tempData, setTempData, playClickSound, playHoverSound, handleAutoPlanBlueprint, isGeneratingBlueprint
 }) => {
     // 0: Protagonist, 1: World, 2: Supporting, 3: Narrative, 4: Plot Blueprint
     const [activePanel, setActivePanel] = useState(1);
@@ -336,7 +338,13 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
         } else if (diff === -2) { // Far Left
              specificStyle = { transform: 'translate3d(-240%, -55%, -400px) rotateY(30deg) scale(0.7)', zIndex: 10, opacity: 0.2, filter: 'blur(4px) brightness(0.4)', pointerEvents: 'auto', cursor: 'pointer' };
         }
-        return { className: baseStyle, style: specificStyle, onClick: diff === 0 ? undefined : () => setActivePanel(index) };
+        return { 
+            className: baseStyle, 
+            style: specificStyle, 
+            onClick: diff === 0 ? undefined : () => setActivePanel(index),
+            // Add sound trigger for panel hover (interaction)
+            onMouseEnter: () => playHoverSound?.() 
+        };
     };
 
     return (

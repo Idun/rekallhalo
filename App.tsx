@@ -86,6 +86,8 @@ const App: React.FC = () => {
                 onDelete={game.deleteSaveGame}
                 onDeleteSession={game.deleteSession}
                 onImport={game.importSaveGame}
+                onUndo={game.handleUndoDelete}
+                canUndo={game.deletedSavesStack.length > 0}
                 onBack={() => game.setGameState(GameState.LANDING)}
                 playClickSound={game.playClickSound}
             />
