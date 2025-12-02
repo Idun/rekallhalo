@@ -167,13 +167,30 @@ const MemoryAccordionItem = ({ title, content, type, context, onSummarize, isSum
     );
 };
 
-interface SuggestionItem { label: string; value: string; type: 'skill' | 'item' | 'location' | 'character'; }
+interface SuggestionItem { label: string; value: string; type: 'skill' | 'item' | 'location' | 'character' | 'visual'; avatar?: string; }
 const AutocompleteList = ({ suggestions, onSelect }: { suggestions: SuggestionItem[], onSelect: (val: string) => void }) => {
     if (suggestions.length === 0) return null;
     return (
         <div className="absolute bottom-full left-0 mb-2 w-full max-w-sm bg-stone-100 border border-stone-300 rounded-lg shadow-xl overflow-hidden z-[100] animate-fade-in-up">
             <div className="bg-stone-200 px-3 py-1 text-[10px] text-gray-500 font-bold uppercase tracking-wider flex justify-between"><span>建议补全</span><span>Tab / Click</span></div>
-            <div className="max-h-40 overflow-y-auto custom-scrollbar">{suggestions.map((item, idx) => (<button key={idx} onClick={() => onSelect(item.value)} className="w-full text-left px-4 py-2 text-sm hover:bg-indigo-50 hover:text-indigo-700 transition-colors border-b border-stone-200 last:border-0 flex items-center gap-2 group"><span className={`text-[10px] px-1.5 rounded font-bold uppercase w-12 text-center ${item.type === 'skill' ? 'bg-yellow-100 text-yellow-700' : item.type === 'item' ? 'bg-emerald-100 text-emerald-700' : item.type === 'character' ? 'bg-pink-100 text-pink-700' : 'bg-blue-100 text-blue-700'}`}>{item.type === 'skill' ? '技能' : item.type === 'item' ? '物品' : item.type === 'character' ? '角色' : '地点'}</span><span className="font-medium text-gray-700 group-hover:text-indigo-700">{item.label}</span></button>))}</div>
+            <div className="max-h-60 overflow-y-auto custom-scrollbar">{suggestions.map((item, idx) => (
+                <button key={idx} onClick={() => onSelect(item.value)} className="w-full text-left px-4 py-2 text-sm hover:bg-indigo-50 hover:text-indigo-700 transition-colors border-b border-stone-200 last:border-0 flex items-center gap-2 group">
+                    <span className={`text-[10px] px-1.5 rounded font-bold uppercase w-12 text-center shrink-0 
+                        ${item.type === 'skill' ? 'bg-yellow-100 text-yellow-700' : 
+                          item.type === 'item' ? 'bg-emerald-100 text-emerald-700' : 
+                          item.type === 'character' ? 'bg-pink-100 text-pink-700' : 
+                          item.type === 'visual' ? 'bg-purple-100 text-purple-700' :
+                          'bg-blue-100 text-blue-700'}`}>
+                        {item.type === 'skill' ? '技能' : item.type === 'item' ? '物品' : item.type === 'character' ? '角色' : item.type === 'visual' ? '镜头' : '地点'}
+                    </span>
+                    {item.avatar && (
+                        <div className="w-6 h-6 rounded-full overflow-hidden border border-stone-300 shrink-0">
+                            <img src={item.avatar} alt="" className="w-full h-full object-cover" />
+                        </div>
+                    )}
+                    <span className="font-medium text-gray-700 group-hover:text-indigo-700 truncate">{item.label}</span>
+                </button>
+            ))}</div>
         </div>
     );
 };
@@ -244,6 +261,7 @@ interface GameScreenProps {
     handleRegenerate: (mode: 'full' | 'text' | 'choices') => void; // Updated Prop Type
     handleSwitchVersion: (segmentId: string, direction: 'prev' | 'next') => void;
     handleGlobalReplace: (findText: string, replaceText: string) => number;
+    handleUpdateSegmentText?: (segmentId: string, newText: string) => void;
     handleAddScheduledEvent?: (event: Omit<ScheduledEvent, 'id' | 'createdTurn' | 'status'>) => void; 
     handleUpdateScheduledEvent?: (event: ScheduledEvent) => void; 
     handleDeleteScheduledEvent?: (id: string) => void; 
@@ -283,7 +301,7 @@ export const GameScreen: React.FC<GameScreenProps> = (props) => {
         onOpenImageModal, onOpenCharacterModal, onOpenHistoryModal, onOpenSkillModal, onOpenRegenConfirm, onOpenSettings,
         shouldBlurBackground, playClickSound, handleSummarizeMemory, isSummarizing, handleRegenerate, handleSwitchVersion,
         handleGlobalReplace, visualEffect, setVisualEffect, autoSaveState, showStoryPanelBackground, storyFontSize, storyFontFamily,
-        isCurrentBgFavorited, onToggleFavorite
+        isCurrentBgFavorited, onToggleFavorite, handleUpdateSegmentText
     } = props;
 
     const [viewingIndex, setViewingIndex] = useState(context.history.length - 1);
@@ -330,6 +348,7 @@ export const GameScreen: React.FC<GameScreenProps> = (props) => {
         const lowerInput = inputText.toLowerCase().trim();
         const lastChars = lowerInput.slice(-4);
         let newSuggestions: SuggestionItem[] = [];
+        
         if (lastChars.endsWith("技能") || lastChars.endsWith("招式") || lastChars.endsWith("/")) {
             newSuggestions = context.character.skills.map(s => ({ label: s.name, value: `(发动技能) ${s.name}: ${s.description}`, type: 'skill' }));
         } else if (lastChars.endsWith("道具") || lastChars.endsWith("物品") || lastChars.endsWith("背包") || lastChars.endsWith("#")) {
@@ -342,15 +361,39 @@ export const GameScreen: React.FC<GameScreenProps> = (props) => {
             newSuggestions.push({ label: "寻找附近城镇", value: "前往附近的城镇", type: 'location' });
             newSuggestions.push({ label: "探索周边", value: "探索周边环境", type: 'location' });
         } else if (lastChars.endsWith("@")) {
-            newSuggestions = context.supportingCharacters.map(c => ({ label: c.name, value: `与 ${c.name} 对话`, type: 'character' }));
-            newSuggestions.unshift({ label: "自言自语", value: "自言自语：", type: 'character' });
+            newSuggestions = context.supportingCharacters.map(c => ({ 
+                label: c.name, 
+                value: `与 ${c.name} 对话`, 
+                type: 'character',
+                avatar: c.avatar 
+            }));
+            newSuggestions.unshift({ label: "自言自语", value: "自言自语：", type: 'character', avatar: context.character.avatar });
+            
+            // Added Camera suggestions to @ trigger
+            newSuggestions.push(
+                { label: "特写镜头 (强调表情)", value: "(视觉指令: 特写, 强调表情细微变化)", type: 'visual' },
+                { label: "中景镜头 (半身交互)", value: "(视觉指令: 中景, 展现肢体动作与互动)", type: 'visual' },
+                { label: "全景镜头 (环境氛围)", value: "(视觉指令: 全景, 侧重环境与站位关系)", type: 'visual' },
+                { label: "远景镜头 (宏大场面)", value: "(视觉指令: 远景, 宏大场面与渺小人物)", type: 'visual' },
+                { label: "动态透视 (冲击力)", value: "(视觉指令: 动态大透视/鱼眼, 增强画面冲击力)", type: 'visual' },
+                { label: "上帝视角 (俯瞰全局)", value: "(视觉指令: 上帝视角俯瞰, 展现全局战况)", type: 'visual' }
+            );
+        } else if (lastChars.endsWith("镜头") || lastChars.endsWith("景别") || lastChars.endsWith("画面")) {
+            newSuggestions = [
+                { label: "特写镜头 (强调表情)", value: "(视觉指令: 特写, 强调表情细微变化)", type: 'visual' },
+                { label: "中景镜头 (半身交互)", value: "(视觉指令: 中景, 展现肢体动作与互动)", type: 'visual' },
+                { label: "全景镜头 (环境氛围)", value: "(视觉指令: 全景, 侧重环境与站位关系)", type: 'visual' },
+                { label: "远景镜头 (宏大场面)", value: "(视觉指令: 远景, 宏大场面与渺小人物)", type: 'visual' },
+                { label: "动态透视 (冲击力)", value: "(视觉指令: 动态大透视/鱼眼, 增强画面冲击力)", type: 'visual' },
+                { label: "上帝视角 (俯瞰全局)", value: "(视觉指令: 上帝视角俯瞰, 展现全局战况)", type: 'visual' }
+            ];
         }
         setSuggestions(newSuggestions);
     }, [inputText, context, inputMode, inputPage]);
 
     const handleSuggestionSelect = (val: string) => {
         const currentText = inputText;
-        const triggers = ["技能", "招式", "/", "道具", "物品", "背包", "#", "地点", "前往", "@"];
+        const triggers = ["技能", "招式", "/", "道具", "物品", "背包", "#", "地点", "前往", "@", "镜头", "景别", "画面"];
         let baseText = currentText;
         for (const trigger of triggers) {
             if (currentText.endsWith(trigger)) {
@@ -643,12 +686,11 @@ export const GameScreen: React.FC<GameScreenProps> = (props) => {
         </div>
     );
 
-    // ... (rest of the file including renderTextInput, renderPaginator, getBubbleStyles, and main return logic remains unchanged) ...
     const renderTextInput = (isChatMode: boolean) => (
         <div className={`flex gap-3 items-end w-full max-w-5xl mx-auto`}>
             <div className="relative flex-1">
                 <AutocompleteList suggestions={suggestions} onSelect={handleSuggestionSelect} />
-                 <textarea value={inputText} onChange={(e) => setInputText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); if (inputText.trim()) handleChoice(inputText, viewingIndex); } }} placeholder="按 Enter 换行，Shift + Enter 发送... (输入 /技能 #物品 @角色 可联想)" className={`w-full p-4 rounded-lg shadow-lg resize-none min-h-[80px] max-h-[120px] custom-scrollbar ${styles.input} ${styles.font}`} autoFocus />
+                 <textarea value={inputText} onChange={(e) => setInputText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); if (inputText.trim()) handleChoice(inputText, viewingIndex); } }} placeholder="按 Enter 换行，Shift + Enter 发送... (输入 /技能 #物品 @角色 镜头... 可联想)" className={`w-full p-4 rounded-lg shadow-lg resize-none min-h-[80px] max-h-[120px] custom-scrollbar ${styles.input} ${styles.font}`} autoFocus />
             </div>
             { (isLoading || (isLatest && !textTypingComplete)) ? (
                 <div className={`h-[80px] w-[80px] rounded-lg font-bold transition-all border flex items-center justify-center ${styles.container} opacity-100`}>
@@ -696,7 +738,6 @@ export const GameScreen: React.FC<GameScreenProps> = (props) => {
             setContext={setContext}
             initialViewMode="graph"
         />
-        {/* Removed redundant audio element */}
 
         <div className={`absolute inset-0 z-10 cursor-pointer transition-opacity ${isUiVisible ? 'block' : 'hidden'}`} onClick={() => setIsUiVisible(false)} title="点击隐藏界面 (沉浸模式)" />
         {generatingImage && ( <div className="absolute top-20 right-4 z-20 bg-black/40 backdrop-blur px-3 py-1 rounded-full flex items-center gap-2 border border-white/10 animate-pulse"> <span className="w-2 h-2 bg-purple-400 rounded-full"></span> <span className="text-[10px] text-white/80">具象化重构中...</span> </div> )}
@@ -761,7 +802,7 @@ export const GameScreen: React.FC<GameScreenProps> = (props) => {
                     <div className="absolute -right-16 bottom-0 z-[100]">{sideToolsContent}</div>
                     <div className="absolute bottom-3 left-6 flex flex-col items-start z-20 pointer-events-auto opacity-0 hover:opacity-100 transition-opacity duration-300"><span className={`text-[10px] font-mono font-bold text-white/90 bg-black/50 backdrop-blur-md px-2 py-1 rounded border border-white/20 shadow-sm cursor-default`}>{segment.text.length}字 / ≈{Math.round(segment.text.length * 1.3)} tokens</span></div>
                     <div className="flex-1 overflow-y-auto p-5 md:p-6 pt-10 pb-12 max-h-[43vh] [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
-                        <div className={`${styles.font} leading-relaxed select-text cursor-text pointer-events-auto`} onMouseDown={(e) => e.stopPropagation()} style={{ fontSize: `${storyFontSize}px`, fontFamily: storyFontFamily }}>
+                        <div className={`${styles.font} leading-relaxed select-text cursor-text pointer-events-auto relative group/text`} onMouseDown={(e) => e.stopPropagation()} style={{ fontSize: `${storyFontSize}px`, fontFamily: storyFontFamily }}>
                             <TypingText key={segment.id} text={segment.text} speed={typingSpeed === 0 ? 0 : typingSpeed} onComplete={() => { if (isLatest) setTextTypingComplete(true); }} instant={!isLatest || (isLatest && textTypingComplete) || typingSpeed === 0} context={context} onHoverEntity={handleHoverEntity} />
                         </div>
                     </div>
@@ -773,7 +814,7 @@ export const GameScreen: React.FC<GameScreenProps> = (props) => {
                 </div>
             ) : (
                 <div className="pointer-events-auto h-[70vh] w-full flex flex-col justify-end relative" onClick={() => setIsUiVisible(false)}>
-                    {/* ... Text Mode Viewer (Unchanged) ... */}
+                    {/* Text Mode Viewer */}
                     <div className="overflow-y-auto px-4 pt-6 space-y-6 pb-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
                         {context.history.map((seg, idx) => {
                             const isCurrent = idx === context.history.length - 1;
@@ -793,6 +834,10 @@ export const GameScreen: React.FC<GameScreenProps> = (props) => {
                             
                             const textColorClass = factionStyle?.text ? factionStyle.text : '';
 
+                            // Location Logic for Text Mode
+                            const segLoc = seg.location || "未知区域";
+                            const segDisplayName = segLoc && segName ? `${segLoc} · ${segName}` : segName;
+
                             return (
                                 <div key={seg.id} className="flex flex-col gap-4">
                                     {isUserCaused && (<div className="flex justify-end animate-fade-in-up" onClick={(e) => e.stopPropagation()}><div className="max-w-[80%] bg-stone-200 text-gray-800 p-4 rounded-2xl shadow-md border border-stone-300 relative"><div className="text-sm font-sans whitespace-pre-wrap select-text cursor-text">{seg.causedBy}</div></div></div>)}
@@ -800,7 +845,7 @@ export const GameScreen: React.FC<GameScreenProps> = (props) => {
                                          <div className="ml-3 mr-2 shrink-0 pt-0 z-20 translate-x-1"><GenreAvatar avatar={charAvatar} name={segName} genre={context.genre} isProtagonist={isProtagonistSpeaking} onClick={() => { playClickSound(); onOpenCharacterModal(supportingChar?.id); }} className="w-24 h-24 md:w-28 md:h-28 text-xl" /></div>
                                          <div className={`max-w-[85%] p-5 rounded-2xl shadow-lg relative group bg-opacity-95 ${bubbleContainerClass}`}>
                                              <div className="flex items-center gap-2 mb-2 opacity-60">
-                                                 <span className={`text-xs font-bold ${styles.accent}`}>{segName}</span>
+                                                 <span className={`text-xs font-bold ${styles.accent}`}>{segDisplayName}</span>
                                                  {supportingChar && supportingChar.affinity !== undefined && (<div className="flex items-center gap-1 ml-2 bg-black/20 px-1.5 py-0.5 rounded-full"><span className="text-[10px] text-pink-500 font-bold">♥ {supportingChar.affinity}</span><div className="w-8 h-1 bg-black/20 rounded-full overflow-hidden"><div className="h-full bg-pink-500 transition-all" style={{width: `${Math.min(Math.max(((supportingChar.affinity + 50) / 100) * 100, 0), 100)}%`}} /></div></div>)}
                                              </div>
                                              <div className={`${styles.font} ${textColorClass} leading-relaxed mb-2 select-text cursor-text pointer-events-auto`} onMouseDown={(e) => e.stopPropagation()} style={{ fontSize: `${storyFontSize}px`, fontFamily: storyFontFamily }}>{isCurrent ? ( <TypingText text={seg.text} speed={typingSpeed === 0 ? 0 : typingSpeed} onComplete={() => setTextTypingComplete(true)} instant={typingSpeed === 0} context={context} onHoverEntity={handleHoverEntity} /> ) : ( <span>{seg.text}</span> )}</div>

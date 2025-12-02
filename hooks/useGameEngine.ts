@@ -5,12 +5,14 @@ import {
     generateUUID, SaveType, ImageSize, ShotSize, SupportingCharacter, 
     Character, WorldSettings, ScheduledEvent, PlotChapter,
     ImageModel, AvatarStyle, InputMode, VisualEffectType, GalleryItem,
-    MemoryState, StorySegment
+    MemoryState, StorySegment, TextModelProvider
 } from '../types';
 import * as GeminiService from '../services/geminiService';
 import { StorageService } from '../services/storageService';
 import { getRandomBackground, getSmartBackground } from '../components/SmoothBackground';
 import { CHARACTER_ARCHETYPES } from '../constants';
+
+// ... (retain all constants and imports up to useGameEngine) ...
 
 const DEFAULT_MEMORY: MemoryState = {
     memoryZone: "",
@@ -113,14 +115,20 @@ export const useGameEngine = () => {
     const [isCurrentBgFavorited, setIsCurrentBgFavorited] = useState(false);
 
     // --- State: Settings ---
+    const [textModelProvider, setTextModelProvider] = useState<TextModelProvider>('gemini');
     const [aiModel, setAiModel] = useState<string>('gemini-2.5-pro');
     const [imageModel, setImageModel] = useState<ImageModel>('gemini-2.5-flash-image-preview');
+    const [geminiApiKey, setGeminiApiKey] = useState('');
+    const [customApiUrl, setCustomApiUrl] = useState('');
+    const [customApiKey, setCustomApiKey] = useState('');
+    const [availableCustomModels, setAvailableCustomModels] = useState<string[]>([]);
     const [avatarStyle, setAvatarStyle] = useState<AvatarStyle>('anime');
     const [customAvatarStyle, setCustomAvatarStyle] = useState('');
     const [avatarRefImage, setAvatarRefImage] = useState('');
     const [backgroundStyle, setBackgroundStyle] = useState<'anime'|'realistic'>('anime');
     const [inputMode, setInputMode] = useState<InputMode>('choice');
     const [modelScopeApiKey, setModelScopeApiKey] = useState('');
+    const [modelScopeApiUrl, setModelScopeApiUrl] = useState('https://modelscope.cn/api/v1');
     const [customPrompt, setCustomPrompt] = useState('');
     const [isMuted, setIsMuted] = useState(false);
     const [volume, setVolume] = useState(0.4); // Lower default volume
@@ -150,6 +158,8 @@ export const useGameEngine = () => {
     const bgmAudioRef = useRef<HTMLAudioElement | null>(null);
     const currentTrackUrlRef = useRef<string | null>(null);
     const latestContextRef = useRef(context);
+    // BGM Bug Fix: Ref to track current GameState inside audio callbacks
+    const gameStateRef = useRef(gameState);
 
     // --- Sound Effects Logic ---
     const soundsRef = useRef<Record<string, HTMLAudioElement>>({});
@@ -192,12 +202,18 @@ export const useGameEngine = () => {
             const loadedSettings = localStorage.getItem('protagonist_settings');
             if (loadedSettings) {
                 const s = JSON.parse(loadedSettings);
+                setTextModelProvider(s.textModelProvider || 'gemini');
                 setAiModel(s.aiModel || 'gemini-2.5-pro');
                 setImageModel(s.imageModel || 'gemini-2.5-flash-image-preview');
+                setGeminiApiKey(s.geminiApiKey || '');
+                setCustomApiUrl(s.customApiUrl || '');
+                setCustomApiKey(s.customApiKey || '');
                 setAvatarStyle(s.avatarStyle || 'anime');
                 setBackgroundStyle(s.backgroundStyle || 'anime');
                 if (s.volume !== undefined) setVolume(s.volume);
                 if (s.isMuted !== undefined) setIsMuted(s.isMuted);
+                if (s.modelScopeApiKey !== undefined) setModelScopeApiKey(s.modelScopeApiKey);
+                if (s.modelScopeApiUrl !== undefined) setModelScopeApiUrl(s.modelScopeApiUrl);
                 // Load other settings...
                 if (s.showStoryPanelBackground !== undefined) setShowStoryPanelBackground(s.showStoryPanelBackground);
                 if (s.autoSaveGallery !== undefined) setAutoSaveGallery(s.autoSaveGallery);
@@ -226,15 +242,21 @@ export const useGameEngine = () => {
     // Save Settings Effect
     useEffect(() => {
         localStorage.setItem('protagonist_settings', JSON.stringify({
-            aiModel, imageModel, avatarStyle, backgroundStyle, volume, isMuted, showStoryPanelBackground, autoSaveGallery
+            textModelProvider, aiModel, imageModel, geminiApiKey, customApiUrl, customApiKey,
+            avatarStyle, backgroundStyle, volume, isMuted, showStoryPanelBackground, autoSaveGallery,
+            modelScopeApiKey, modelScopeApiUrl
         }));
-    }, [aiModel, imageModel, avatarStyle, backgroundStyle, volume, isMuted, showStoryPanelBackground, autoSaveGallery]);
+    }, [textModelProvider, aiModel, imageModel, geminiApiKey, customApiUrl, customApiKey, avatarStyle, backgroundStyle, volume, isMuted, showStoryPanelBackground, autoSaveGallery, modelScopeApiKey, modelScopeApiUrl]);
 
-    // Update Latest Context Ref
+    // Update Refs for Audio Callbacks
     useEffect(() => { latestContextRef.current = context; }, [context]);
+    useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
 
     // --- BGM Logic (Refactored) ---
     const playRandomTrack = useCallback((mood: StoryMood) => {
+        // BGM Bug Fix: Strictly check state before playing new track
+        if (gameStateRef.current !== GameState.PLAYING) return;
+
         if (!bgmAudioRef.current) return;
         const playlist = EXTENDED_PLAYLISTS[mood] || EXTENDED_PLAYLISTS[StoryMood.PEACEFUL];
         let availableTracks = playlist.filter(t => t !== currentTrackUrlRef.current);
@@ -259,12 +281,16 @@ export const useGameEngine = () => {
             
             // Auto-play next track when ended
             bgmAudioRef.current.addEventListener('ended', () => {
+                // Ensure we are still playing before starting next track
+                if (gameStateRef.current !== GameState.PLAYING) return;
+                
                 const currentMood = latestContextRef.current.currentSegment?.mood || StoryMood.PEACEFUL;
                 playRandomTrack(currentMood);
             });
             
             // Handle loading errors by skipping track
             bgmAudioRef.current.addEventListener('error', (e) => {
+                if (gameStateRef.current !== GameState.PLAYING) return;
                 console.warn("Audio error, skipping track", e);
                 const currentMood = latestContextRef.current.currentSegment?.mood || StoryMood.PEACEFUL;
                 playRandomTrack(currentMood);
@@ -433,9 +459,22 @@ export const useGameEngine = () => {
         };
 
         setContext(safeContext);
-        if (save.context.currentSegment?.backgroundImage) {
-            setBgImage(save.context.currentSegment.backgroundImage);
+        
+        // Smart Background Resolution to prevent Black Screen Flash
+        let resolvedBg = save.context.currentSegment?.backgroundImage;
+        if (!resolvedBg && save.context.history && save.context.history.length > 0) {
+             // If current segment has no BG (e.g. text only update), traverse back to find last valid one
+             for (let i = save.context.history.length - 1; i >= 0; i--) {
+                 if (save.context.history[i].backgroundImage) {
+                     resolvedBg = save.context.history[i].backgroundImage;
+                     break;
+                 }
+             }
         }
+        if (resolvedBg) {
+            setBgImage(resolvedBg);
+        }
+
         if (forceSetup || save.type === SaveType.SETUP) {
             setGameState(GameState.SETUP);
         } else {
@@ -449,6 +488,7 @@ export const useGameEngine = () => {
         setGameState(GameState.LANDING);
     };
 
+    // ... (autoPlanBlueprint, handleStartGame, etc. remain the same) ...
     const handleAutoPlanBlueprint = async (config?: { chapterCount: number, wordCountRange: [number, number], newCharCount: number, newOrgCount: number, customGuidance?: string }) => {
         if (!context.character.name) {
             setError("请先在「主角档案」中填写主角姓名");
@@ -473,7 +513,8 @@ export const useGameEngine = () => {
                 context.plotBlueprint || [], 
                 config, 
                 context.narrativeMode, 
-                context.narrativeTechnique 
+                context.narrativeTechnique,
+                geminiApiKey 
             );
             
             const mappedNewChars: SupportingCharacter[] = newCharacters.map((nc: any) => {
@@ -564,19 +605,32 @@ export const useGameEngine = () => {
                 customPrompt, 
                 context.narrativeMode, 
                 context.narrativeTechnique, 
-                initialBlueprint
+                initialBlueprint,
+                geminiApiKey
             );
             
             if (abortControllerRef.current?.signal.aborted) throw new Error("Aborted");
             setLoadingProgress(prev => Math.max(prev, 40));
             
-            const avatarPromise = GeminiService.generateCharacterAvatar(context.genre, context.character, avatarStyle, imageModel, customAvatarStyle, modelScopeApiKey, avatarRefImage);
-            const sceneImagePromise = GeminiService.generateSceneImage(opening.visualPrompt + ", no humans, nobody, scenery only, landscape, architecture, environment", ImageSize.SIZE_1K, backgroundStyle, "", customAvatarStyle, imageModel, modelScopeApiKey, ShotSize.EXTREME_LONG_SHOT);
+            const avatarPromise = GeminiService.generateCharacterAvatar(context.genre, context.character, avatarStyle, imageModel, customAvatarStyle, modelScopeApiKey, avatarRefImage, geminiApiKey);
+            const sceneImagePromise = GeminiService.generateSceneImage(
+                opening.visualPrompt + ", no humans, nobody, scenery only, landscape, architecture, environment", 
+                ImageSize.SIZE_1K, 
+                backgroundStyle, 
+                "", 
+                customAvatarStyle, 
+                imageModel, 
+                modelScopeApiKey, 
+                ShotSize.EXTREME_LONG_SHOT, 
+                undefined, 
+                geminiApiKey,
+                modelScopeApiUrl // Pass the URL here
+            );
             
             const supportingCharPromises = context.supportingCharacters.map(async (sc) => { 
                 if (sc.avatar) return sc; 
                 try { 
-                    const scAvatar = await GeminiService.generateCharacterAvatar(context.genre, sc, avatarStyle, imageModel, customAvatarStyle, modelScopeApiKey, avatarRefImage); 
+                    const scAvatar = await GeminiService.generateCharacterAvatar(context.genre, sc, avatarStyle, imageModel, customAvatarStyle, modelScopeApiKey, avatarRefImage, geminiApiKey); 
                     return { ...sc, avatar: scAvatar }; 
                 } catch (e) { return sc; } 
             });
@@ -681,7 +735,8 @@ export const useGameEngine = () => {
                 context.narrativeMode,
                 context.narrativeTechnique,
                 context.plotBlueprint || [],
-                'full'
+                'full',
+                geminiApiKey
             );
 
             let updatedSupportingChars = [...context.supportingCharacters];
@@ -838,6 +893,30 @@ export const useGameEngine = () => {
         setGameState(GameState.LANDING);
     };
 
+    // Update segment text manually
+    const handleUpdateSegmentText = (segmentId: string, newText: string) => {
+        setContext(prev => {
+            const newHistory = prev.history.map(seg => 
+                seg.id === segmentId ? { ...seg, text: newText } : seg
+            );
+            
+            // Also sync current segment if valid
+            const newCurrent = prev.currentSegment?.id === segmentId 
+                ? { ...prev.currentSegment, text: newText } 
+                : prev.currentSegment;
+
+            return {
+                ...prev,
+                history: newHistory,
+                currentSegment: newCurrent,
+                lastUpdated: Date.now()
+            };
+        });
+        
+        // Also update save if needed (Optional: auto-save on edit?)
+        // For now, we update in-memory context only.
+    };
+
     const handleGenerateImage = () => {
         if (!context.currentSegment) return;
         playClickSound();
@@ -849,7 +928,11 @@ export const useGameEngine = () => {
             "", 
             customImageStyle, 
             imageModel, 
-            modelScopeApiKey
+            modelScopeApiKey,
+            undefined,
+            undefined,
+            geminiApiKey,
+            modelScopeApiUrl // Pass the URL here
         ).then(img => {
             setBgImage(img);
             if (context.currentSegment) {
@@ -868,7 +951,7 @@ export const useGameEngine = () => {
         if (!selectedCharacterId) return;
         setGeneratingImage(true);
         const char = context.supportingCharacters.find(c => c.id === selectedCharacterId) || context.character;
-        GeminiService.generateCharacterAvatar(context.genre, char as any, selectedImageStyle, imageModel, customImageStyle, modelScopeApiKey, avatarRefImage)
+        GeminiService.generateCharacterAvatar(context.genre, char as any, selectedImageStyle, imageModel, customImageStyle, modelScopeApiKey, avatarRefImage, geminiApiKey)
             .then(img => {
                 if (char === context.character) {
                     setContext(prev => ({ ...prev, character: { ...prev.character, avatar: img } }));
@@ -889,7 +972,7 @@ export const useGameEngine = () => {
         if (context.history.length < 2) return;
         setIsSummarizing(true);
         try {
-            const summary = await GeminiService.summarizeHistory(context.history, aiModel);
+            const summary = await GeminiService.summarizeHistory(context.history, aiModel, geminiApiKey);
             setContext(prev => ({ ...prev, memories: { ...prev.memories, storyMemory: summary } }));
             playProgressSound();
         } catch(e) { console.error("Summarize failed", e); } finally { setIsSummarizing(false); }
@@ -911,7 +994,7 @@ export const useGameEngine = () => {
             if (mode === 'choices') {
                 const historyContext = context.history; 
                 newSegment = await GeminiService.advanceStory(
-                    historyContext, "", context.genre, context.character, context.supportingCharacters, context.worldSettings, context.memories, aiModel, context.customGenre, customPrompt, context.scheduledEvents || [], context.narrativeMode, context.narrativeTechnique, context.plotBlueprint, 'choices'
+                    historyContext, "", context.genre, context.character, context.supportingCharacters, context.worldSettings, context.memories, aiModel, context.customGenre, customPrompt, context.scheduledEvents || [], context.narrativeMode, context.narrativeTechnique, context.plotBlueprint, 'choices', geminiApiKey
                 );
                 setContext(prev => {
                     const history = [...prev.history];
@@ -922,7 +1005,7 @@ export const useGameEngine = () => {
                 const historyContext = context.history.slice(0, lastIdx);
                 const causedBy = lastSegment.causedBy || "";
                 newSegment = await GeminiService.advanceStory(
-                    historyContext, causedBy, context.genre, context.character, context.supportingCharacters, context.worldSettings, context.memories, aiModel, context.customGenre, customPrompt, context.scheduledEvents || [], context.narrativeMode, context.narrativeTechnique, context.plotBlueprint, mode
+                    historyContext, causedBy, context.genre, context.character, context.supportingCharacters, context.worldSettings, context.memories, aiModel, context.customGenre, customPrompt, context.scheduledEvents || [], context.narrativeMode, context.narrativeTechnique, context.plotBlueprint, mode, geminiApiKey
                 );
                 newSegment.causedBy = causedBy;
                 
@@ -1040,21 +1123,40 @@ export const useGameEngine = () => {
     };
 
     // Settings Setters
+    const handleSetTextModelProvider = (p: TextModelProvider) => setTextModelProvider(p);
     const handleSetAiModel = (m: string) => setAiModel(m);
     const handleSetImageModel = (m: ImageModel) => setImageModel(m);
+    const handleSetCustomApiUrl = (s: string) => setCustomApiUrl(s);
+    const handleSetCustomApiKey = (s: string) => setCustomApiKey(s);
+    const handleSetGeminiApiKey = (s: string) => setGeminiApiKey(s);
     const handleSetAvatarStyle = (s: AvatarStyle) => setAvatarStyle(s);
     const handleSetCustomAvatarStyle = (s: string) => setCustomAvatarStyle(s);
     const handleSetAvatarRefImage = (s: string) => setAvatarRefImage(s);
     const handleSetBackgroundStyle = (s: any) => setBackgroundStyle(s);
     const handleSetInputMode = (m: InputMode) => setInputMode(m);
     const handleSetModelScopeApiKey = (k: string) => setModelScopeApiKey(k);
+    const handleSetModelScopeApiUrl = (u: string) => setModelScopeApiUrl(u);
     const handleSetCustomPrompt = (s: string) => setCustomPrompt(s);
     const handleSetShowStoryPanelBackground = (b: boolean) => setShowStoryPanelBackground(b);
     const handleSetHistoryFontSize = (n: number) => setHistoryFontSize(n);
     const handleSetStoryFontSize = (n: number) => setStoryFontSize(n);
     const handleSetStoryFontFamily = (s: string) => setStoryFontFamily(s);
     const handleSetAutoSaveGallery = (b: boolean) => setAutoSaveGallery(b);
-    const handleTestModelScope = async (key: string) => GeminiService.validateModelScopeConnection(key);
+    const handleTestModelScope = async (key: string) => GeminiService.validateModelScopeConnection(key, modelScopeApiUrl);
+    const handleTestGeminiConnection = async (key: string) => GeminiService.validateGeminiConnection(key);
+    const handleTestCustomConnection = async (url: string, key: string) => {
+        try {
+            const models = await GeminiService.fetchOpenAICompatibleModels(url, key);
+            setAvailableCustomModels(models);
+            if (models.length > 0 && (textModelProvider === 'gemini' || !availableCustomModels.includes(aiModel))) {
+                setAiModel(models[0]);
+            }
+            return `连接成功, 找到 ${models.length} 个模型。`;
+        } catch (e) {
+            setAvailableCustomModels([]);
+            throw e;
+        }
+    };
 
     return {
         gameState, setGameState,
@@ -1064,14 +1166,22 @@ export const useGameEngine = () => {
         modals, toggleModal,
         savedGames, handleLoadGame, deleteSaveGame, deleteSession, importSaveGame, handleUndoDelete, deletedSavesStack,
         gallery, viewingImage, setViewingImage, deleteFromGallery,
+        textModelProvider, handleSetTextModelProvider,
         aiModel, handleSetAiModel,
         imageModel, handleSetImageModel,
+        geminiApiKey, handleSetGeminiApiKey,
+        customApiUrl, handleSetCustomApiUrl,
+        customApiKey, handleSetCustomApiKey,
+        availableCustomModels,
+        setAvailableCustomModels,
+        handleTestCustomConnection,
         avatarStyle, handleSetAvatarStyle,
         customAvatarStyle, handleSetCustomAvatarStyle,
         avatarRefImage, handleSetAvatarRefImage,
         backgroundStyle, handleSetBackgroundStyle,
         inputMode, handleSetInputMode,
         modelScopeApiKey, handleSetModelScopeApiKey, handleTestModelScope,
+        modelScopeApiUrl, handleSetModelScopeApiUrl,
         customPrompt, handleSetCustomPrompt,
         isMuted, setIsMuted, volume, setVolume,
         showStoryPanelBackground, handleSetShowStoryPanelBackground,
@@ -1083,7 +1193,7 @@ export const useGameEngine = () => {
         setupTempData, setSetupTempData,
         handleStartNewGameSetup, handleStartGame, handleSaveSetup, handleAutoPlanBlueprint, handleAbortGame,
         handleBackToHome, handleManualSave, handleChoice, handleUseSkill, handleSummarizeMemory,
-        handleRegenerate, handleSwitchVersion, handleGlobalReplace,
+        handleRegenerate, handleSwitchVersion, handleGlobalReplace, handleUpdateSegmentText,
         handleAddScheduledEvent, handleUpdateScheduledEvent, handleDeleteScheduledEvent,
         textTypingComplete, setTextTypingComplete,
         typingSpeed, setTypingSpeed,
@@ -1098,6 +1208,7 @@ export const useGameEngine = () => {
         handleRegenerateAvatar,
         selectedImageStyle, setSelectedImageStyle,
         customImageStyle, setCustomImageStyle,
-        handleUpgradeSkill
+        handleUpgradeSkill,
+        handleTestGeminiConnection
     };
 };

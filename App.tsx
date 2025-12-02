@@ -121,7 +121,8 @@ const App: React.FC = () => {
                 handleSummarizeMemory={game.handleSummarizeMemory}
                 handleRegenerate={game.handleRegenerate}
                 handleSwitchVersion={game.handleSwitchVersion}
-                handleGlobalReplace={game.handleGlobalReplace} 
+                handleGlobalReplace={game.handleGlobalReplace}
+                handleUpdateSegmentText={game.handleUpdateSegmentText} 
                 handleAddScheduledEvent={game.handleAddScheduledEvent} 
                 handleUpdateScheduledEvent={game.handleUpdateScheduledEvent} 
                 handleDeleteScheduledEvent={game.handleDeleteScheduledEvent} 
@@ -194,10 +195,24 @@ const App: React.FC = () => {
         {game.modals.settings && (
             <SettingsModal 
                 onClose={() => game.toggleModal('settings', false)}
+                textModelProvider={game.textModelProvider}
+                setTextModelProvider={game.handleSetTextModelProvider}
                 aiModel={game.aiModel}
                 setAiModel={game.handleSetAiModel}
                 imageModel={game.imageModel}
                 setImageModel={game.handleSetImageModel}
+                customApiUrl={game.customApiUrl}
+                setCustomApiUrl={game.handleSetCustomApiUrl}
+                customApiKey={game.customApiKey}
+                setCustomApiKey={game.handleSetCustomApiKey}
+                availableCustomModels={game.availableCustomModels}
+                setAvailableCustomModels={game.setAvailableCustomModels}
+                onTestCustomConnection={game.handleTestCustomConnection}
+                
+                geminiApiKey={game.geminiApiKey}
+                setGeminiApiKey={game.handleSetGeminiApiKey}
+                handleTestGeminiConnection={game.handleTestGeminiConnection}
+
                 avatarStyle={game.avatarStyle}
                 setAvatarStyle={game.handleSetAvatarStyle}
                 customAvatarStyle={game.customAvatarStyle}
@@ -210,6 +225,8 @@ const App: React.FC = () => {
                 setInputMode={game.handleSetInputMode}
                 modelScopeApiKey={game.modelScopeApiKey}
                 setModelScopeApiKey={game.handleSetModelScopeApiKey}
+                modelScopeApiUrl={game.modelScopeApiUrl}
+                setModelScopeApiUrl={game.handleSetModelScopeApiUrl}
                 onTestModelScope={game.handleTestModelScope}
                 
                 isMuted={game.isMuted}
@@ -250,6 +267,7 @@ const App: React.FC = () => {
                 fontFamily={game.storyFontFamily}
                 plotBlueprint={game.context.plotBlueprint}
                 storyName={game.context.storyName}
+                onUpdateSegment={game.handleUpdateSegmentText}
             />
         )}
 

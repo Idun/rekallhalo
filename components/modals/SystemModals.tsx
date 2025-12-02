@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect } from 'react';
-import { GalleryItem, ImageModel, AvatarStyle, BackgroundStyle, InputMode } from '../../types';
+import { GalleryItem, ImageModel, AvatarStyle, BackgroundStyle, InputMode, TextModelProvider } from '../../types';
 
 interface GalleryModalProps {
     gallery: GalleryItem[];
@@ -66,8 +67,23 @@ export const ImageViewer = ({ image, onClose }: { image: GalleryItem, onClose: (
 
 interface SettingsModalProps {
     onClose: () => void;
+    // Text Model
+    textModelProvider: TextModelProvider;
+    setTextModelProvider: (p: TextModelProvider) => void;
     aiModel: string;
     setAiModel: (m: string) => void;
+    geminiApiKey: string;
+    setGeminiApiKey: (k: string) => void;
+    customApiUrl: string;
+    setCustomApiUrl: (s: string) => void;
+    customApiKey: string;
+    setCustomApiKey: (s: string) => void;
+    availableCustomModels: string[];
+    setAvailableCustomModels: (models: string[]) => void;
+    onTestCustomConnection: (url: string, key: string) => Promise<string>;
+    handleTestGeminiConnection: (key: string) => Promise<string>;
+
+    // Image Model
     imageModel: ImageModel;
     setImageModel: (m: ImageModel) => void;
     avatarStyle: AvatarStyle;
@@ -84,6 +100,8 @@ interface SettingsModalProps {
     // ModelScope
     modelScopeApiKey: string;
     setModelScopeApiKey: (key: string) => void;
+    modelScopeApiUrl: string;
+    setModelScopeApiUrl: (url: string) => void;
     onTestModelScope: (key: string) => Promise<string>;
 
     // Audio Props
@@ -113,7 +131,13 @@ interface SettingsModalProps {
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ 
     onClose, 
+    textModelProvider, setTextModelProvider,
     aiModel, setAiModel, 
+    geminiApiKey, setGeminiApiKey,
+    customApiUrl, setCustomApiUrl,
+    customApiKey, setCustomApiKey,
+    availableCustomModels, setAvailableCustomModels, onTestCustomConnection,
+    handleTestGeminiConnection,
     imageModel, setImageModel,
     avatarStyle, setAvatarStyle, 
     customAvatarStyle, setCustomAvatarStyle,
@@ -121,6 +145,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     backgroundStyle, setBackgroundStyle, 
     inputMode, setInputMode,
     modelScopeApiKey, setModelScopeApiKey,
+    modelScopeApiUrl, setModelScopeApiUrl,
     onTestModelScope,
     isMuted, setIsMuted,
     volume, setVolume,
@@ -134,8 +159,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     const [activeTab, setActiveTab] = useState<'model' | 'prompt' | 'avatar' | 'display' | 'gameplay' | 'audio'>('model');
     
     // Local state for connection testing
-    const [isTesting, setIsTesting] = useState(false);
-    const [testResult, setTestResult] = useState<{success: boolean, message: string} | null>(null);
+    const [isTestingMS, setIsTestingMS] = useState(false);
+    const [testResultMS, setTestResultMS] = useState<{success: boolean, message: string} | null>(null);
+    const [isTestingCustom, setIsTestingCustom] = useState(false);
+    const [testResultCustom, setTestResultCustom] = useState<{success: boolean, message: string} | null>(null);
+    const [isTestingGemini, setIsTestingGemini] = useState(false);
+    const [testResultGemini, setTestResultGemini] = useState<{success: boolean, message: string} | null>(null);
 
     const TabButton = ({ id, label }: { id: string, label: string }) => (
         <button 
@@ -152,17 +181,64 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </button>
     );
 
-    const handleTestConnection = async () => {
+    const handleProviderChange = (provider: TextModelProvider) => {
+        setTextModelProvider(provider);
+        setTestResultCustom(null);
+        setTestResultGemini(null);
+        setAvailableCustomModels([]);
+        
+        if (provider === 'gemini') {
+            setAiModel('gemini-2.5-pro');
+        } else {
+            setAiModel('');
+        }
+
+        if (provider === 'deepseek') {
+            setCustomApiUrl('https://api.deepseek.com');
+        } else if (provider === 'anthropic' || provider === 'openai_compatible') {
+            setCustomApiUrl('');
+        }
+    };
+
+    const handleTestModelScope = async () => {
         if (!modelScopeApiKey) return;
-        setIsTesting(true);
-        setTestResult(null);
+        setIsTestingMS(true);
+        setTestResultMS(null);
         try {
             const msg = await onTestModelScope(modelScopeApiKey);
-            setTestResult({ success: true, message: msg });
+            setTestResultMS({ success: true, message: msg });
         } catch (e: any) {
-            setTestResult({ success: false, message: e.message || "未知错误" });
+            setTestResultMS({ success: false, message: e.message || "未知错误" });
         } finally {
-            setIsTesting(false);
+            setIsTestingMS(false);
+        }
+    };
+
+    const handleTestGemini = async () => {
+        if (!geminiApiKey) return;
+        setIsTestingGemini(true);
+        setTestResultGemini(null);
+        try {
+            const msg = await handleTestGeminiConnection(geminiApiKey);
+            setTestResultGemini({ success: true, message: msg });
+        } catch (e: any) {
+            setTestResultGemini({ success: false, message: e.message || "未知错误" });
+        } finally {
+            setIsTestingGemini(false);
+        }
+    };
+
+    const handleTestCustom = async () => {
+        if (!customApiUrl || !customApiKey) return;
+        setIsTestingCustom(true);
+        setTestResultCustom(null);
+        try {
+            const msg = await onTestCustomConnection(customApiUrl, customApiKey);
+            setTestResultCustom({ success: true, message: msg });
+        } catch (e: any) {
+            setTestResultCustom({ success: false, message: e.message || "未知错误" });
+        } finally {
+            setIsTestingCustom(false);
         }
     };
 
@@ -195,6 +271,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         { label: '古风行楷 (Ma Shan Zheng)', value: "'Ma Shan Zheng', cursive" },
         { label: '系统楷体 (KaiTi)', value: "'KaiTi', 'STKaiti', serif" }
     ];
+
+    let apiUrlPlaceholder = "例如: https://api.openai.com";
+    if (textModelProvider === 'anthropic') {
+        apiUrlPlaceholder = "输入兼容 Claude 的代理 URL";
+    }
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 font-mono">
@@ -251,8 +332,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           </button>
                       </div>
 
-                      {/* Scrollable Content */}
-                      <div className="flex-1 overflow-y-auto custom-scrollbar p-6 md:p-8 relative">
+                      {/* Scrollable Content - Hidden Scrollbar */}
+                      <div className="flex-1 overflow-y-auto p-6 md:p-8 relative [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
                           {/* Use a fade-in opacity animation instead of transforms to prevent layout flashing */}
                           <div className="space-y-8 animate-fade-in-opacity" key={activeTab}>
                                 <style>{`@keyframes fade-in-opacity { from { opacity: 0; } to { opacity: 1; } } .animate-fade-in-opacity { animation: fade-in-opacity 0.4s ease-out; }`}</style>
@@ -261,28 +342,170 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                         {/* Text Models */}
                                         <div>
                                             <div className="text-xs text-indigo-600/70 uppercase tracking-widest mb-3 border-l-2 border-indigo-400 pl-2">文本生成引擎</div>
-                                            <div className="grid grid-cols-1 gap-3">
-                                                {[
-                                                    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', desc: '旗舰性能 // 默认推荐' },
-                                                    { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro', desc: '高推理能力 // 进阶选择' },
-                                                    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', desc: '标准速度 // 性能均衡' },
-                                                ].map(m => (
-                                                    <button 
-                                                        key={m.id} 
-                                                        onClick={() => setAiModel(m.id)} 
-                                                        className={`group relative p-4 border transition-all text-left overflow-hidden ${aiModel === m.id ? 'border-indigo-500 bg-indigo-50' : 'border-stone-200 bg-white hover:border-gray-400'}`}
+                                            <div className="mb-4">
+                                                <label className="text-[10px] text-gray-500 uppercase font-bold mb-2 block">提供商</label>
+                                                <div className="relative">
+                                                    <select
+                                                        value={textModelProvider}
+                                                        onChange={(e) => handleProviderChange(e.target.value as TextModelProvider)}
+                                                        className="w-full bg-white border border-stone-300 rounded px-3 py-2 text-sm text-gray-800 focus:border-indigo-500 outline-none transition-colors font-mono appearance-none"
                                                     >
-                                                        {aiModel === m.id && <div className="absolute top-0 right-0 w-0 h-0 border-t-[20px] border-r-[20px] border-t-transparent border-r-indigo-500"></div>}
-                                                        <div className={`font-bold font-mono text-sm tracking-wider ${aiModel === m.id ? 'text-indigo-700' : 'text-gray-600'}`}>{m.name}</div>
-                                                        <div className="text-[10px] text-gray-400 mt-1 font-mono">{m.desc}</div>
-                                                    </button>
-                                                ))}
+                                                        <option value="gemini">Google Gemini</option>
+                                                        <option value="deepseek">DeepSeek (OpenAI 兼容)</option>
+                                                        <option value="anthropic">Anthropic / Claude (需兼容代理)</option>
+                                                        <option value="openai_compatible">自定义 OpenAI 兼容接口</option>
+                                                    </select>
+                                                    <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
+                                                        <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 9l4-4 4 4m0 6l-4 4-4-4"></path></svg>
+                                                    </div>
+                                                </div>
                                             </div>
+
+                                            {textModelProvider === 'gemini' && (
+                                                <div className="space-y-4 animate-fade-in-opacity">
+                                                    <div className="bg-white p-3 border border-stone-200 rounded-lg">
+                                                        <label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">API Key (可选，若已配置ENV则留空)</label>
+                                                        <div className="flex gap-2">
+                                                            <input 
+                                                                type="password"
+                                                                value={geminiApiKey}
+                                                                onChange={(e) => { setGeminiApiKey(e.target.value); setTestResultGemini(null); }}
+                                                                placeholder="输入 Gemini API Key"
+                                                                className="flex-1 bg-stone-50 border border-stone-300 rounded px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:border-indigo-500 outline-none transition-colors font-mono"
+                                                            />
+                                                            <button
+                                                                onClick={handleTestGemini}
+                                                                disabled={!geminiApiKey || isTestingGemini}
+                                                                className={`px-3 py-1 text-xs font-bold rounded border transition-all flex items-center gap-2
+                                                                    ${isTestingGemini ? 'bg-gray-100 text-gray-400 border-gray-200' : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'}
+                                                                `}
+                                                            >
+                                                                {isTestingGemini && <span className="animate-spin">⟳</span>}
+                                                                测试
+                                                            </button>
+                                                        </div>
+                                                        {testResultGemini && (
+                                                            <div className={`mt-2 text-[10px] font-bold flex items-center gap-1 ${testResultGemini.success ? 'text-green-600' : 'text-red-500'}`}>
+                                                                <span>{testResultGemini.success ? '✓' : '✕'}</span>
+                                                                {testResultGemini.message}
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    <div className="grid grid-cols-1 gap-3 animate-fade-in-opacity">
+                                                        {[
+                                                            { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', desc: '旗舰性能 // 默认推荐' },
+                                                            { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro', desc: '高推理能力 // 进阶选择' },
+                                                            { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', desc: '标准速度 // 性能均衡' },
+                                                        ].map(m => (
+                                                            <button 
+                                                                key={m.id} 
+                                                                onClick={() => setAiModel(m.id)} 
+                                                                className={`group relative p-4 border transition-all text-left overflow-hidden ${aiModel === m.id ? 'border-indigo-500 bg-indigo-50' : 'border-stone-200 bg-white hover:border-gray-400'}`}
+                                                            >
+                                                                {aiModel === m.id && <div className="absolute top-0 right-0 w-0 h-0 border-t-[20px] border-r-[20px] border-t-transparent border-r-indigo-500"></div>}
+                                                                <div className={`font-bold font-mono text-sm tracking-wider ${aiModel === m.id ? 'text-indigo-700' : 'text-gray-600'}`}>{m.name}</div>
+                                                                <div className="text-[10px] text-gray-400 mt-1 font-mono">{m.desc}</div>
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {['openai_compatible', 'deepseek', 'anthropic'].includes(textModelProvider) && (
+                                                <div className="space-y-4 animate-fade-in-opacity">
+                                                    <div className="bg-white p-3 border border-stone-200 rounded-lg space-y-2">
+                                                        <div>
+                                                            <label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">API URL</label>
+                                                            <input 
+                                                                type="text"
+                                                                value={customApiUrl}
+                                                                onChange={(e) => setCustomApiUrl(e.target.value)}
+                                                                placeholder={apiUrlPlaceholder}
+                                                                readOnly={textModelProvider === 'deepseek'}
+                                                                className="w-full bg-stone-50 border border-stone-300 rounded px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:border-indigo-500 outline-none transition-colors font-mono read-only:bg-stone-200 read-only:text-gray-500"
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">API Key</label>
+                                                            <div className="flex gap-2">
+                                                                <input 
+                                                                    type="password"
+                                                                    value={customApiKey}
+                                                                    onChange={(e) => { setCustomApiKey(e.target.value); setTestResultCustom(null); }}
+                                                                    placeholder="输入 Key (不会上传至服务器)"
+                                                                    className="flex-1 bg-stone-50 border border-stone-300 rounded px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:border-indigo-500 outline-none transition-colors font-mono"
+                                                                />
+                                                                <button
+                                                                    onClick={handleTestCustom}
+                                                                    disabled={!customApiUrl || !customApiKey || isTestingCustom}
+                                                                    className={`px-3 py-1 text-xs font-bold rounded border transition-all flex items-center gap-2
+                                                                        ${isTestingCustom ? 'bg-gray-100 text-gray-400 border-gray-200' : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'}
+                                                                    `}
+                                                                >
+                                                                    {isTestingCustom ? <span className="animate-spin">⟳</span> : <span>⚡</span>}
+                                                                    测试
+                                                                </button>
+                                                            </div>
+                                                            {testResultCustom && (
+                                                                <div className={`mt-2 text-[10px] font-bold flex items-center gap-1 ${testResultCustom.success ? 'text-green-600' : 'text-red-500'}`}>
+                                                                    <span>{testResultCustom.success ? '✓' : '✕'}</span>
+                                                                    {testResultCustom.message}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    <div className="bg-white p-3 border border-stone-200 rounded-lg">
+                                                        <label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">模型</label>
+                                                        <select
+                                                            value={aiModel}
+                                                            onChange={(e) => setAiModel(e.target.value)}
+                                                            disabled={availableCustomModels.length === 0}
+                                                            className="w-full bg-stone-50 border border-stone-300 rounded px-3 py-2 text-sm text-gray-800 focus:border-indigo-500 outline-none transition-colors font-mono disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        >
+                                                            {availableCustomModels.length === 0 && <option>请先测试连接</option>}
+                                                            {availableCustomModels.map(m => (
+                                                                <option key={m} value={m}>{m}</option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
 
                                         {/* Image Models - Gemini */}
                                         <div>
                                             <div className="text-xs text-pink-600/70 uppercase tracking-widest mb-3 border-l-2 border-pink-400 pl-2">视觉渲染引擎 (Gemini)</div>
+                                            
+                                            <div className="mb-4 bg-white p-3 border border-stone-200 rounded-lg">
+                                                <label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">API Key (可选，与文本生成共用)</label>
+                                                <div className="flex gap-2">
+                                                    <input 
+                                                        type="password"
+                                                        value={geminiApiKey}
+                                                        onChange={(e) => { setGeminiApiKey(e.target.value); setTestResultGemini(null); }}
+                                                        placeholder="输入 Gemini API Key"
+                                                        className="flex-1 bg-stone-50 border border-stone-300 rounded px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:border-pink-500 outline-none transition-colors font-mono"
+                                                    />
+                                                    <button
+                                                        onClick={handleTestGemini}
+                                                        disabled={!geminiApiKey || isTestingGemini}
+                                                        className={`px-3 py-1 text-xs font-bold rounded border transition-all flex items-center gap-2
+                                                            ${isTestingGemini ? 'bg-gray-100 text-gray-400 border-gray-200' : 'bg-pink-50 text-pink-700 border-pink-200 hover:bg-pink-100'}
+                                                        `}
+                                                    >
+                                                        {isTestingGemini && <span className="animate-spin">⟳</span>}
+                                                        测试
+                                                    </button>
+                                                </div>
+                                                {testResultGemini && (
+                                                    <div className={`mt-2 text-[10px] font-bold flex items-center gap-1 ${testResultGemini.success ? 'text-green-600' : 'text-red-500'}`}>
+                                                        <span>{testResultGemini.success ? '✓' : '✕'}</span>
+                                                        {testResultGemini.message}
+                                                    </div>
+                                                )}
+                                            </div>
+
                                             <div className="grid grid-cols-1 gap-3">
                                                 {[
                                                     { id: 'gemini-2.5-flash-image-preview', name: 'Gemini 2.5 Flash Image Preview', desc: '实验性模型 // 最新技术' },
@@ -305,46 +528,54 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                         <div>
                                             <div className="text-xs text-purple-600/70 uppercase tracking-widest mb-3 border-l-2 border-purple-400 pl-2">魔搭 (ModelScope)</div>
                                             
-                                            <div className="mb-4 bg-white p-3 border border-stone-200 rounded-lg">
-                                                <label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">ModelScope SDK Token</label>
-                                                <div className="flex gap-2">
+                                            <div className="mb-4 bg-white p-3 border border-stone-200 rounded-lg space-y-2">
+                                                <div>
+                                                    <label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">ModelScope API URL (支持代理)</label>
                                                     <input 
-                                                        type="password"
-                                                        value={modelScopeApiKey}
-                                                        onChange={(e) => {
-                                                            setModelScopeApiKey(e.target.value);
-                                                            setTestResult(null); // Reset test result on change
-                                                        }}
-                                                        placeholder="输入 Key (不会上传至服务器)"
-                                                        className="flex-1 bg-stone-50 border border-stone-300 rounded px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:border-purple-500 outline-none transition-colors font-mono"
+                                                        type="text"
+                                                        value={modelScopeApiUrl}
+                                                        onChange={(e) => setModelScopeApiUrl(e.target.value)}
+                                                        placeholder="例如: https://modelscope.cn/api/v1 (或代理地址)"
+                                                        className="w-full bg-stone-50 border border-stone-300 rounded px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:border-purple-500 outline-none transition-colors font-mono"
                                                     />
-                                                    <button
-                                                        onClick={handleTestConnection}
-                                                        disabled={!modelScopeApiKey || isTesting}
-                                                        className={`px-3 py-1 text-xs font-bold rounded border transition-all flex items-center gap-2
-                                                            ${isTesting ? 'bg-gray-100 text-gray-400 border-gray-200' : 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100'}
-                                                        `}
-                                                    >
-                                                        {isTesting ? (
-                                                            <span className="animate-spin">⟳</span>
-                                                        ) : (
-                                                            <span>⚡</span>
-                                                        )}
-                                                        测试
-                                                    </button>
+                                                </div>
+                                                <div>
+                                                    <label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">ModelScope SDK Token</label>
+                                                    <div className="flex gap-2">
+                                                        <input 
+                                                            type="password"
+                                                            value={modelScopeApiKey}
+                                                            onChange={(e) => {
+                                                                setModelScopeApiKey(e.target.value);
+                                                                setTestResultMS(null); // Reset test result on change
+                                                            }}
+                                                            placeholder="输入 Key (不会上传至服务器)"
+                                                            className="flex-1 bg-stone-50 border border-stone-300 rounded px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:border-purple-500 outline-none transition-colors font-mono"
+                                                        />
+                                                        <button
+                                                            onClick={handleTestModelScope}
+                                                            disabled={!modelScopeApiKey || isTestingMS}
+                                                            className={`px-3 py-1 text-xs font-bold rounded border transition-all flex items-center gap-2
+                                                                ${isTestingMS ? 'bg-gray-100 text-gray-400 border-gray-200' : 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100'}
+                                                            `}
+                                                        >
+                                                            {isTestingMS && <span className="animate-spin">⟳</span>}
+                                                            测试
+                                                        </button>
+                                                    </div>
                                                 </div>
                                                 
                                                 {/* Test Result Feedback */}
-                                                {testResult && (
-                                                    <div className={`mt-2 text-[10px] font-bold flex items-center gap-1 ${testResult.success ? 'text-green-600' : 'text-red-500'}`}>
-                                                        <span>{testResult.success ? '✓' : '✕'}</span>
-                                                        {testResult.message}
+                                                {testResultMS && (
+                                                    <div className={`mt-2 text-[10px] font-bold flex items-center gap-1 ${testResultMS.success ? 'text-green-600' : 'text-red-500'}`}>
+                                                        <span>{testResultMS.success ? '✓' : '✕'}</span>
+                                                        {testResultMS.message}
                                                     </div>
                                                 )}
 
-                                                {!testResult && (
+                                                {!testResultMS && (
                                                     <p className="text-[9px] text-gray-400 mt-1 font-mono leading-tight">
-                                                        注意：浏览器直接调用 ModelScope API 可能会因 CORS 策略失败。
+                                                        注意：浏览器直接调用 ModelScope API 可能会因 CORS 策略失败，建议配置代理。
                                                     </p>
                                                 )}
                                             </div>

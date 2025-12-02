@@ -95,9 +95,18 @@ const getCameraStyle = (shotType?: ShotSize | null) => {
 };
 
 export const SmoothBackground = ({ src, shouldBlur, brightness = 0.6, position = 'center', shotType }: SmoothBackgroundProps) => {
-    // Initialize layers immediately with the prop if available
-    const [layers, setLayers] = useState<{id: string, src: string, shotType?: ShotSize | null}[]>(src ? [{id: 'init', src, shotType}] : []);
+    // Manage layers state. Each layer has an `id` and `visible` status.
+    // New layers enter with `visible: false` and transition to `true`.
+    const [layers, setLayers] = useState<{
+        id: string; 
+        src: string; 
+        shotType?: ShotSize | null; 
+        visible: boolean;
+    }[]>(
+        src ? [{id: 'init', src, shotType, visible: true}] : []
+    );
     
+    // 1. Preload Image and Update Layers
     useEffect(() => {
         if (!src) return;
 
@@ -110,12 +119,15 @@ export const SmoothBackground = ({ src, shouldBlur, brightness = 0.6, position =
             if (!isMounted) return;
             setLayers(prev => {
                 const lastLayer = prev[prev.length - 1];
-                // Only update if the source URL has actually changed OR the shotType has changed
-                // This ensures cinematic camera moves can trigger even on same background
+                // Only update if the source URL or shot type has actually changed
                 if (!lastLayer || lastLayer.src !== src || lastLayer.shotType !== shotType) {
                     const newId = generateUUID();
-                    // Keep at most 2 layers to manage memory and transition
-                    return [...prev, {id: newId, src, shotType}].slice(-2);
+                    // Add new layer as invisible first to set up the transition "enter" state
+                    const newLayer = {id: newId, src, shotType, visible: false};
+                    
+                    // Maintain at most 2 layers: [Previous (fading out/covered), Current (fading in)]
+                    // We slice to keep the last 2 elements.
+                    return [...prev, newLayer].slice(-2);
                 }
                 return prev;
             });
@@ -124,22 +136,22 @@ export const SmoothBackground = ({ src, shouldBlur, brightness = 0.6, position =
         return () => { isMounted = false; };
     }, [src, shotType]);
 
-    // Define animation styles for fade in
-    const fadeInStyle = {
-        animation: 'fadeIn 1.5s cubic-bezier(0.4, 0, 0.2, 1) forwards', // Slower fade for better immersion
-    };
+    // 2. Trigger Visibility Transition
+    useEffect(() => {
+        // If the top layer is not visible, trigger visibility after a brief delay
+        // to allow the DOM to mount with opacity 0 first (enabling CSS transition).
+        const lastLayer = layers[layers.length - 1];
+        if (lastLayer && !lastLayer.visible) {
+            const timer = setTimeout(() => {
+                setLayers(prev => prev.map(l => l.id === lastLayer.id ? { ...l, visible: true } : l));
+            }, 50); // Short delay for React render cycle + DOM paint
+            return () => clearTimeout(timer);
+        }
+    }, [layers]);
 
     return (
         <div className="absolute inset-0 bg-gradient-to-br from-gray-900 to-black pointer-events-none overflow-hidden z-0">
-            <style>{`
-                @keyframes fadeIn {
-                    from { opacity: 0; }
-                    to { opacity: 1; }
-                }
-            `}</style>
             {layers.map((layer, index) => {
-                const isTopLayer = index === layers.length - 1;
-                
                 // Base filter style
                 const filterStyle = shouldBlur ? 'blur(12px)' : `brightness(${brightness})`;
                 
@@ -149,14 +161,16 @@ export const SmoothBackground = ({ src, shouldBlur, brightness = 0.6, position =
                 return (
                     <div
                         key={layer.id}
-                        className="absolute inset-0 w-full h-full overflow-hidden"
+                        className="absolute inset-0 w-full h-full overflow-hidden will-change-opacity"
                         style={{
                             zIndex: index,
-                            ...(isTopLayer && layers.length > 1 ? fadeInStyle : { opacity: 1 }),
+                            opacity: layer.visible ? 1 : 0,
+                            // Use CSS transition for smooth crossfade
+                            transition: 'opacity 1.5s cubic-bezier(0.4, 0, 0.2, 1)', 
                         }}
                     >
                          <div 
-                            className="absolute inset-0 bg-cover bg-no-repeat"
+                            className="absolute inset-0 bg-cover bg-no-repeat will-change-transform"
                             style={{
                                 backgroundImage: `url(${layer.src})`,
                                 backgroundPosition: position,

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { GameContext, ImageSize, StoryMood, MOOD_LABELS, SupportingCharacter, Character, SavedGame, StoryGenre, StorySegment, ScheduledEvent, PlotChapter } from '../../types';
 import { Button } from '../Button';
@@ -19,39 +20,6 @@ const getLocationIcon = (loc?: string): string => {
     if (loc.match(/路|道|途/)) return '🏞'; // Path
     if (loc.match(/船|舟/)) return '⚓'; // Boat/Anchor
     return '◎'; // Default Location
-};
-
-const normalizeTextForEdit = (text: string) => {
-    if (!text) return "";
-    let res = text;
-    
-    // 1. Basic Punctuation Mapping (Half-width to Full-width)
-    const map: Record<string, string> = {
-        ',': '，',
-        '?': '？',
-        '!': '！',
-        ':': '：',
-        ';': '；',
-        '(': '（',
-        ')': '）'
-    };
-    res = res.replace(/[,?!:;()]/g, (m) => map[m] || m);
-
-    // 2. Smart Quotes (Double) " -> “ ”
-    let dOpen = false;
-    res = res.replace(/"/g, () => {
-        dOpen = !dOpen;
-        return dOpen ? '“' : '”';
-    });
-
-    // 3. Smart Quotes (Single) ' -> ‘ ’
-    let sOpen = false;
-    res = res.replace(/'/g, () => {
-        sOpen = !sOpen;
-        return sOpen ? '‘' : '’';
-    });
-
-    return res;
 };
 
 export const ExitConfirmModal = ({ onConfirm, onCancel }: { onConfirm: () => void, onCancel: () => void }) => (
@@ -124,8 +92,7 @@ const ChapterSection = ({ title, segments, fontSize, fontFamily, defaultOpen = f
 
     const startEdit = (id: string, currentText: string) => {
         setEditingId(id);
-        // Normalize text to use Chinese punctuation when editing starts
-        setEditText(normalizeTextForEdit(currentText));
+        setEditText(currentText);
     };
 
     const cancelEdit = () => {
@@ -197,19 +164,12 @@ const ChapterSection = ({ title, segments, fontSize, fontFamily, defaultOpen = f
                                         <textarea 
                                             value={editText}
                                             onChange={(e) => setEditText(e.target.value)}
-                                            className="w-full h-auto min-h-[160px] p-3 border border-blue-300 rounded-lg bg-white text-gray-800 outline-none focus:ring-2 focus:ring-blue-200 resize-y leading-relaxed shadow-inner"
-                                            style={{ 
-                                                fontSize: `${fontSize}px`,
-                                                fontFamily: fontFamily || "'Noto Serif SC', serif"
-                                            }}
+                                            className="w-full h-32 p-2 border border-blue-300 rounded bg-white text-sm text-gray-800 outline-none focus:ring-2 focus:ring-blue-200 resize-y"
                                             autoFocus
                                         />
-                                        <div className="flex justify-between items-center text-[10px] text-gray-400 px-1">
-                                            <span>* 已自动转换为全角标点</span>
-                                            <div className="flex gap-2">
-                                                <button onClick={cancelEdit} className="text-xs px-3 py-1.5 bg-gray-200 hover:bg-gray-300 rounded text-gray-700 font-bold transition-colors">取消</button>
-                                                <button onClick={() => saveEdit(h.id)} className="text-xs px-3 py-1.5 bg-blue-500 hover:bg-blue-600 rounded text-white font-bold transition-colors shadow-sm">保存修改</button>
-                                            </div>
+                                        <div className="flex justify-end gap-2">
+                                            <button onClick={cancelEdit} className="text-xs px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-gray-700 font-bold">取消</button>
+                                            <button onClick={() => saveEdit(h.id)} className="text-xs px-3 py-1 bg-blue-500 hover:bg-blue-600 rounded text-white font-bold">保存修改</button>
                                         </div>
                                     </div>
                                 ) : (

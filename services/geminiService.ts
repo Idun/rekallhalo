@@ -1,11 +1,12 @@
 
 import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { StoryGenre, Character, StorySegment, ImageSize, SupportingCharacter, StoryMood, generateUUID, WorldSettings, Skill, AvatarStyle, MemoryState, ImageModel, ShotSize, ScheduledEvent, PlotChapter } from '../types';
-// FIX: Corrected typo from NATIVE_STRUCTURES to NARRATIVE_STRUCTURES
 import { WULIN_CONTEXT, WESTERN_FANTASY_CONTEXT, NARRATIVE_STRUCTURES, NARRATIVE_TECHNIQUES, CHARACTER_ARCHETYPES } from '../constants';
 
 // Initialize client with the env key.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Note: We access process.env.API_KEY directly here for the default instance, 
+// but functional calls use the dynamic key passed from UI/State.
+const getClient = (apiKey?: string) => new GoogleGenAI({ apiKey: apiKey || process.env.API_KEY });
 
 // --- Safety Settings ---
 const SAFETY_SETTINGS = [
@@ -132,6 +133,44 @@ const storyResponseSchema = {
   required: ["text", "choices", "visualPrompt", "mood", "memoryUpdate"]
 };
 
+// --- Helper: Perspective Rules Generation ---
+const getPerspectiveInstruction = (perspective: string | undefined, charName: string): string => {
+    const p = perspective || 'third';
+    let rules = "";
+    
+    switch (p) {
+        case 'first':
+            rules = `**STRICT FIRST PERSON (POV: "I" / "我")**. The protagonist refers to themselves as "I". You are the protagonist. Never use "You" to address the protagonist.`;
+            break;
+        case 'second':
+            rules = `**STRICT SECOND PERSON (POV: "You" / "你")**. Address the protagonist as "You". This is a standard interactive fiction style.`;
+            break;
+        case 'omniscient':
+            rules = `**STRICT OMNISCIENT VIEW (God View)**. 
+            1. The narrator is a detached, all-knowing observer.
+            2. **FORBIDDEN**: Do NOT use "You" (你) or "I" (我) in the narration.
+            3. **MANDATORY**: Refer to the protagonist by their Name ("${charName}") or third-person pronouns (He/She).
+            4. Focus on the broader scope, world details, and multiple characters' thoughts simultaneously.`;
+            break;
+        case 'third':
+        default:
+            rules = `**STRICT THIRD PERSON (POV: "${charName}" / "He" / "She")**.
+            1. Refer to the protagonist by Name or He/She.
+            2. **FORBIDDEN**: Do NOT use "You" (你) or "I" (我) in the narration (except inside dialogue spoken by characters).`;
+            break;
+    }
+
+    return `
+    [NARRATIVE PERSPECTIVE RULES - CRITICAL]
+    ${rules}
+    
+    [CHOICES STYLE]
+    - If First Person: Choices use "I" (e.g., "I attack").
+    - If Second Person: Choices use "You" or Imperative (e.g., "Attack").
+    - If Third/Omniscient: Choices use the character's Name or descriptive action (e.g., "${charName} attacks").
+    `;
+};
+
 // --- Main AI Functions ---
 
 export const generateOpening = async (
@@ -145,9 +184,11 @@ export const generateOpening = async (
     customPrompt?: string,
     narrativeMode?: string,
     narrativeTechnique?: string,
-    plotBlueprint: PlotChapter[] = []
+    plotBlueprint: PlotChapter[] = [],
+    apiKey?: string
 ): Promise<StorySegment> => {
   
+  const ai = getClient(apiKey);
   const worldContext = getWorldContext(genre);
   
   const structure = NARRATIVE_STRUCTURES.find(s => s.id === narrativeMode);
@@ -156,8 +197,10 @@ export const generateOpening = async (
   // If a blueprint exists, it defines the structure. Narrative settings become stylistic hints.
   const hasBlueprint = plotBlueprint && plotBlueprint.length > 0;
 
+  const perspectiveInstruction = getPerspectiveInstruction(character.perspective, character.name);
+
   const narrativeInstruction = `
-    [NARRATIVE STYLE]
+    [NARRATIVE ARCHITECTURE]
     ${hasBlueprint 
       ? `The story is guided by a plot blueprint. Apply the following as stylistic hints:
       - Structure Style: ${structure ? structure.name : 'Default'}
@@ -166,14 +209,8 @@ export const generateOpening = async (
       - Structure: ${structure ? `${structure.name} - ${structure.description}` : 'Auto-adapt based on genre'}
       - Technique: ${technique ? `${technique.name} - ${technique.description}` : 'Auto-adapt based on context'}`
     }
-    - Perspective: ${character.perspective === 'first' ? "FIRST PERSON ('I'/'我')" : character.perspective === 'second' ? "SECOND PERSON ('You'/'你')" : character.perspective === 'omniscient' ? "OMNISCIENT (All-knowing)" : "THIRD PERSON (Standard Novel)"}
-
-    [CHOICES PERSPECTIVE RULE - CRITICAL]
-    The text content of the 'choices' MUST match the selected perspective:
-    - If 'first' ('I'): Choices should use "I" or imply self-action. e.g., "I draw my sword." or "Ask him about the map."
-    - If 'second' ('You'): Choices should use "You" or Imperative. e.g., "Draw your sword."
-    - If 'third' ('He/She/Name'): Choices should use "He"/"She" or the character's name. e.g., "${character.name} draws his sword."
-    - If 'omniscient': Choices should describe the plot direction. e.g., "The hero draws his sword."
+    
+    ${perspectiveInstruction}
   `;
 
   let blueprintInstruction = "";
@@ -284,9 +321,11 @@ export const advanceStory = async (
     narrativeMode?: string,
     narrativeTechnique?: string,
     plotBlueprint: PlotChapter[] = [],
-    regenerationMode: 'full' | 'text' | 'choices' = 'full'
+    regenerationMode: 'full' | 'text' | 'choices' = 'full',
+    apiKey?: string
 ): Promise<StorySegment> => {
     
+    const ai = getClient(apiKey);
     const lastTurnIndex = history.length - 1;
     const historyWindow = [];
     
@@ -322,8 +361,10 @@ export const advanceStory = async (
     const technique = NARRATIVE_TECHNIQUES.find(t => t.id === narrativeTechnique);
     const hasBlueprint = plotBlueprint && plotBlueprint.length > 0;
 
+    const perspectiveInstruction = getPerspectiveInstruction(character.perspective, character.name);
+
     const narrativeInstruction = `
-      [NARRATIVE STYLE]
+      [NARRATIVE ARCHITECTURE]
       ${hasBlueprint 
         ? `The story is guided by a plot blueprint. Apply the following as stylistic hints:
         - Structure Style: ${structure ? structure.name : 'Default'}
@@ -332,14 +373,8 @@ export const advanceStory = async (
         - Structure: ${structure ? `${structure.name} - ${structure.description}` : 'Auto-adapt based on genre'}
         - Technique: ${technique ? `${technique.name} - ${technique.description}` : 'Auto-adapt based on context'}`
       }
-      - Perspective: ${character.perspective === 'first' ? "FIRST PERSON ('I'/'我')" : character.perspective === 'second' ? "SECOND PERSON ('You'/'你')" : character.perspective === 'omniscient' ? "OMNISCIENT" : "THIRD PERSON"}
-
-      [CHOICES PERSPECTIVE RULE - CRITICAL]
-      The text content of the 'choices' MUST match the selected perspective:
-      - If 'first' ('I'): Choices should use "I" or imply self-action. e.g., "I draw my sword." or "Ask him about the map."
-      - If 'second' ('You'): Choices should use "You" or Imperative. e.g., "Draw your sword."
-      - If 'third' ('He/She/Name'): Choices should use the character's name or He/She. e.g., "${character.name} draws his sword."
-      - If 'omniscient': Choices should describe the plot direction. e.g., "The hero draws his sword."
+      
+      ${perspectiveInstruction}
     `;
 
     const pendingEvents = scheduledEvents.filter(e => e.status === 'pending');
@@ -512,7 +547,7 @@ ${futureChaptersSummary}
     });
 };
 
-// --- Dynamic Plot Generation Functions ---
+// ... (rest of the file remains unchanged for auxiliary functions like autoPlanBlueprint etc.) ...
 
 export const autoPlanBlueprint = async (
     genre: StoryGenre,
@@ -523,9 +558,11 @@ export const autoPlanBlueprint = async (
     existingChapters: PlotChapter[] = [],
     config: { chapterCount: number, wordCountRange: [number, number], newCharCount: number, newOrgCount: number, customGuidance?: string } = { chapterCount: 3, wordCountRange: [3000, 5000], newCharCount: 3, newOrgCount: 1 },
     narrativeMode?: string,
-    narrativeTechnique?: string
+    narrativeTechnique?: string,
+    apiKey?: string
 ): Promise<{ chapters: PlotChapter[], newCharacters: any[] }> => {
     
+    const ai = getClient(apiKey);
     // Determine mode: Continuation or Fresh Start
     const isContinuation = existingChapters.length > 0;
     
@@ -710,8 +747,10 @@ export const generateNextChapter = async (
     prevChapters: PlotChapter[],
     currentContext: string,
     worldSettings: WorldSettings,
-    pendingEvents: ScheduledEvent[]
+    pendingEvents: ScheduledEvent[],
+    apiKey?: string
 ): Promise<PlotChapter> => {
+    const ai = getClient(apiKey);
     const lastChapter = prevChapters[prevChapters.length - 1];
     const pendingEventsText = pendingEvents.filter(e => e.status === 'pending').map(e => `${e.type}: ${e.description}`).join('; ');
 
@@ -777,13 +816,26 @@ export const generateSceneImage = async (
     modelName: string = 'gemini-2.5-flash-image-preview',
     modelScopeKey?: string,
     shotSize?: ShotSize,
-    refImageBase64?: string
+    refImageBase64?: string,
+    apiKey?: string,
+    modelScopeUrl?: string
 ): Promise<string> => {
     
     // ModelScope Integration
     if (modelScopeKey && (modelName === 'Qwen/Qwen-Image' || modelName === 'MusePublic/FLUX.1')) {
         try {
-            const response = await fetch(`https://modelscope.cn/api/v1/inference/text-to-image`, {
+            const baseUrl = modelScopeUrl || 'https://modelscope.cn/api/v1';
+            // Use user/me for validation, but for image gen we need specific endpoints if available. 
+            // Assuming standard ModelScope inference endpoint structure or proxy.
+            // Note: Direct browser access to modelscope.cn/api/v1 often hits CORS.
+            // User must provide a proxy URL in settings if direct access fails.
+            
+            // Standard inference endpoint for text-to-image usually involves task id polling or direct return.
+            // For this demo/template, we simulate a standard synchronous post if possible, 
+            // or assume the user has a proxy that handles the complex flow.
+            // We'll try a generic inference call pattern.
+            
+            const response = await fetch(`${baseUrl}/inference/text-to-image`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${modelScopeKey}`,
@@ -795,15 +847,26 @@ export const generateSceneImage = async (
                     parameters: { size: "1024x1024" }
                 })
             });
+            
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.Message || err.message || "ModelScope Error");
+            }
+
             const data = await response.json();
             if (data.output?.img) return data.output.img; // Base64 or URL
-        } catch (e) {
+        } catch (e: any) {
             console.warn("ModelScope failed, falling back to Gemini", e);
+            if (e.name === 'TypeError' && (e.message === 'Failed to fetch' || e.message.includes('NetworkError'))) {
+                 throw new Error("连接失败：浏览器阻止了请求 (CORS)。请确保您没有使用代理工具干扰，或者该 API 不支持浏览器直接访问。建议在设置中配置 CORS 代理 URL。");
+            }
+            throw e;
         }
     }
 
     // Gemini Image Generation
     return withModelFallback(modelName, IMAGE_MODEL_FALLBACKS, async (model) => {
+        const ai = getClient(apiKey);
         const shotPrompt = shotSize ? shotSize.replace(/_/g, ' ').toLowerCase() : 'cinematic shot';
         const negativeConstraints = "NO TEXT, NO WORDS, NO LETTERS, NO TYPOGRAPHY, NO WATERMARKS, NO SIGNATURES, NO LABELS, NO HUD, NO UI, NO SPEECH BUBBLES.";
         
@@ -836,8 +899,10 @@ export const generateCharacterDetails = async (
     gender: string, 
     category: string,
     existingPersonality?: string,
-    existingAppearance?: string
+    existingAppearance?: string,
+    apiKey?: string
 ): Promise<{personality: string, appearance: string}> => {
+    const ai = getClient(apiKey);
 
     let instruction = "";
     if (existingPersonality || existingAppearance) {
@@ -890,13 +955,15 @@ export const generateCharacterDetails = async (
     }
 };
 
-export const generateSkillDescription = async (genre: StoryGenre, skillName: string, charName: string): Promise<string> => {
+export const generateSkillDescription = async (genre: StoryGenre, skillName: string, charName: string, apiKey?: string): Promise<string> => {
+    const ai = getClient(apiKey);
     const prompt = `Describe the effect of skill "${skillName}" for character "${charName}" in a ${genre} setting. Keep it under 30 words. Chinese.`;
     const response = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt });
     return response.text || "";
 };
 
-export const parseStoryOutline = async (outline: string): Promise<any> => {
+export const parseStoryOutline = async (outline: string, apiKey?: string): Promise<any> => {
+    const ai = getClient(apiKey);
     const prompt = `
         Analyze this story outline: "${outline}".
         Extract the key information into a JSON object. Use Simplified Chinese for all string values (except enum keys).
@@ -953,7 +1020,8 @@ export const parseStoryOutline = async (outline: string): Promise<any> => {
     return JSON.parse(cleanJson(response.text || "{}"));
 };
 
-export const summarizeHistory = async (history: StorySegment[], model: string): Promise<string> => {
+export const summarizeHistory = async (history: StorySegment[], model: string, apiKey?: string): Promise<string> => {
+    const ai = getClient(apiKey);
     const fullText = history.map(h => h.text).join('\n');
     const prompt = `Summarize the following story so far into a concise paragraph (max 200 words) for memory retention. Keep key plot points and status. Chinese.\n\n${fullText}`;
     const response = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt });
@@ -967,24 +1035,112 @@ export const generateCharacterAvatar = async (
     modelName: string,
     customStyle: string = '',
     modelScopeKey?: string,
-    refImage?: string
+    refImage?: string,
+    apiKey?: string
 ): Promise<string> => {
     const visualDesc = char.appearance || char.trait || char.personality || "mysterious figure";
     const subject = `A ${char.gender} character`; 
     
     const prompt = `masterpiece, best quality, close up solo portrait of ${subject}, ${visualDesc}. ${genre} style. ${customStyle}. 参考二次元游戏立绘、Vtuber 皮套设计与插画，形象为日系二次元风，避免美漫风与韩漫“整容感”风格。 pure visual art, no text, no watermark, no signature.`;
     
-    return generateSceneImage(prompt, ImageSize.SIZE_1K, style, "", customStyle, modelName, modelScopeKey, ShotSize.CLOSE_UP, refImage);
+    return generateSceneImage(prompt, ImageSize.SIZE_1K, style, "", customStyle, modelName, modelScopeKey, ShotSize.CLOSE_UP, refImage, apiKey);
 };
 
-export const validateModelScopeConnection = async (key: string): Promise<string> => {
+export const validateModelScopeConnection = async (key: string, url?: string): Promise<string> => {
     try {
-        const response = await fetch(`https://modelscope.cn/api/v1/user/me`, {
+        const baseUrl = url || 'https://modelscope.cn/api/v1';
+        const response = await fetch(`${baseUrl}/user/me`, {
             headers: { 'Authorization': `Bearer ${key}` }
         });
         if (response.ok) return "连接成功";
-        throw new Error("Invalid Key");
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.Message || err.message || "Invalid Key");
+    } catch (e: any) {
+        // Explicitly check for potential CORS/Network errors to give better feedback
+        if (e.name === 'TypeError' && (e.message === 'Failed to fetch' || e.message.includes('NetworkError'))) {
+             throw new Error("连接失败：浏览器阻止了请求 (CORS)。请确保您没有使用代理工具干扰，或者该 API 不支持浏览器直接访问。建议在设置中配置 CORS 代理 URL。");
+        }
+        throw new Error(e.message || "连接失败");
+    }
+};
+
+export const validateGeminiConnection = async (apiKey: string): Promise<string> => {
+    try {
+        const ai = new GoogleGenAI({ apiKey });
+        await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: 'test',
+        });
+        return "连接成功";
+    } catch (e: any) {
+        throw new Error(e.message || "连接失败: API Key 无效或网络错误");
+    }
+};
+
+export const fetchOpenAICompatibleModels = async (url: string, apiKey: string): Promise<string[]> => {
+    let endpointUrl: string;
+    try {
+        // Sanitize the base URL more aggressively to handle user input like "https://api.deepseek.com/v1" or "https://api.deepseek.com/"
+        let baseUrl = url.trim().replace(/\/$/, ''); // remove trailing slash
+        
+        // Remove common suffixes to get to the root if the user pasted a full endpoint
+        baseUrl = baseUrl.replace(/\/chat\/completions$/, '');
+        baseUrl = baseUrl.replace(/\/completions$/, '');
+        baseUrl = baseUrl.replace(/\/models$/, '');
+        
+        // OpenAI compatible endpoints usually follow {base}/v1/models
+        // However, some might just be {base}/models. 
+        // We will try standard OpenAI format first: /v1/models
+        // If the user already included /v1 in the input, avoid doubling it.
+        
+        if (baseUrl.endsWith('/v1')) {
+             endpointUrl = `${baseUrl}/models`;
+        } else {
+             endpointUrl = `${baseUrl}/v1/models`;
+        }
+
+        new URL(endpointUrl); // Validate the constructed URL
     } catch (e) {
-        return "连接失败（注意：CORS 可能阻止浏览器请求）";
+        throw new Error("URL 格式无效，请输入正确的 API 基础地址 (如 https://api.deepseek.com)");
+    }
+
+    try {
+        const response = await fetch(endpointUrl, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                // 'Content-Type' removed to avoid preflight issues on simple GET
+            },
+        });
+
+        if (!response.ok) {
+            let errorMsg = response.statusText;
+            try {
+                const errorBody = await response.json();
+                if (errorBody.error?.message) {
+                    errorMsg = errorBody.error.message;
+                }
+            } catch (e) { /* ignore if response is not json */ }
+            throw new Error(`服务器返回错误 (${response.status}): ${errorMsg}`);
+        }
+
+        const data = await response.json();
+        if (data && Array.isArray(data.data)) {
+            // Filter and map to get model IDs
+            const modelIds = data.data
+                .map((model: any) => model.id)
+                .filter((id: string) => id && !id.includes('embed') && !id.includes('vision')); // a simple filter
+            return modelIds;
+        }
+        throw new Error("响应格式无效: 未找到模型列表 (data.data array)");
+    } catch (e: any) {
+        console.error("Failed to fetch OpenAI compatible models:", e);
+        
+        // Specific handling for CORS errors which typically manifest as generic TypeErrors in fetch
+        if (e.name === 'TypeError' && (e.message === 'Failed to fetch' || e.message.includes('NetworkError'))) {
+             throw new Error("连接被浏览器阻止 (CORS 错误)。这通常是因为目标 API 服务器不允许跨域访问。请尝试使用支持 CORS 的代理地址，或检查您的网络连接。");
+        }
+        
+        throw e;
     }
 };

@@ -1,5 +1,8 @@
 
 
+
+export type TextModelProvider = 'gemini' | 'openai_compatible' | 'deepseek' | 'anthropic';
+
 export enum GameState {
   LANDING = 'LANDING',
   SETUP = 'SETUP',
