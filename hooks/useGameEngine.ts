@@ -37,6 +37,8 @@ const DEFAULT_CONTEXT: GameContext = {
     plotBlueprint: []
 };
 
+const DEFAULT_WRITING_RULES = "请始终保持小说叙述风格，熟练运用“五感写作法”（视觉、听觉、嗅觉、触觉、味觉）和“冰山理论写法”（只描写行动和感官细节，避免直接描写情绪和说教）。采用简洁、自然的口语化表达，使整体叙事更符合现代汉语习惯。多加入人物对话和心理刻画，减少华丽辞藻和纯粹的叙述。避免过于直白的系统提示音，将系统机制自然巧妙地融入世界观中。";
+
 // --- Extended Audio Playlists (Reliable Sources) ---
 const EXTENDED_PLAYLISTS: Record<StoryMood, string[]> = {
   [StoryMood.PEACEFUL]: [
@@ -129,7 +131,7 @@ export const useGameEngine = () => {
     const [inputMode, setInputMode] = useState<InputMode>('choice');
     const [modelScopeApiKey, setModelScopeApiKey] = useState('');
     const [modelScopeApiUrl, setModelScopeApiUrl] = useState('https://modelscope.cn/api/v1');
-    const [customPrompt, setCustomPrompt] = useState('');
+    const [customPrompt, setCustomPrompt] = useState(DEFAULT_WRITING_RULES);
     const [isMuted, setIsMuted] = useState(false);
     const [volume, setVolume] = useState(0.4); // Lower default volume
     const [showStoryPanelBackground, setShowStoryPanelBackground] = useState(true);
@@ -215,6 +217,7 @@ export const useGameEngine = () => {
                 if (s.modelScopeApiKey !== undefined) setModelScopeApiKey(s.modelScopeApiKey);
                 if (s.modelScopeApiUrl !== undefined) setModelScopeApiUrl(s.modelScopeApiUrl);
                 // Load other settings...
+                if (s.customPrompt !== undefined) setCustomPrompt(s.customPrompt);
                 if (s.showStoryPanelBackground !== undefined) setShowStoryPanelBackground(s.showStoryPanelBackground);
                 if (s.autoSaveGallery !== undefined) setAutoSaveGallery(s.autoSaveGallery);
             }
@@ -244,9 +247,9 @@ export const useGameEngine = () => {
         localStorage.setItem('protagonist_settings', JSON.stringify({
             textModelProvider, aiModel, imageModel, geminiApiKey, customApiUrl, customApiKey,
             avatarStyle, backgroundStyle, volume, isMuted, showStoryPanelBackground, autoSaveGallery,
-            modelScopeApiKey, modelScopeApiUrl
+            modelScopeApiKey, modelScopeApiUrl, customPrompt
         }));
-    }, [textModelProvider, aiModel, imageModel, geminiApiKey, customApiUrl, customApiKey, avatarStyle, backgroundStyle, volume, isMuted, showStoryPanelBackground, autoSaveGallery, modelScopeApiKey, modelScopeApiUrl]);
+    }, [textModelProvider, aiModel, imageModel, geminiApiKey, customApiUrl, customApiKey, avatarStyle, backgroundStyle, volume, isMuted, showStoryPanelBackground, autoSaveGallery, modelScopeApiKey, modelScopeApiUrl, customPrompt]);
 
     // Update Refs for Audio Callbacks
     useEffect(() => { latestContextRef.current = context; }, [context]);
