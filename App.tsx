@@ -1,4 +1,3 @@
-
 import React, { useEffect } from 'react';
 import { GameState } from './types';
 import { useGameEngine } from './hooks/useGameEngine';
@@ -117,7 +116,10 @@ const App: React.FC = () => {
                 handleBackToHome={game.handleBackToHome}
                 handleManualSave={game.handleManualSave}
                 handleChoice={game.handleChoice}
-                handleUseSkill={(skill) => { game.toggleModal('skill', false); game.handleChoice(`(发动技能) ${skill.name}: ${skill.description}`); }}
+                /**
+                 * Use the centralized handleUseSkill from the game engine.
+                 */
+                handleUseSkill={game.handleUseSkill}
                 handleSummarizeMemory={game.handleSummarizeMemory}
                 handleRegenerate={game.handleRegenerate}
                 handleSwitchVersion={game.handleSwitchVersion}
@@ -295,7 +297,10 @@ const App: React.FC = () => {
         {game.modals.skill && (
             <SkillModal 
                 skills={game.context.character.skills} 
-                onUseSkill={(skill) => { game.toggleModal('skill', false); game.handleChoice(`(发动技能) ${skill.name}: ${skill.description}`); }} 
+                /**
+                 * Use the centralized handleUseSkill from the game engine.
+                 */
+                onUseSkill={game.handleUseSkill} 
                 onClose={() => game.toggleModal('skill', false)}
                 onUpgrade={(skill) => game.handleUpgradeSkill(skill.id)}
             />
